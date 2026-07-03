@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.hypothesis/
+htmlcov/
+.coverage
+coverage.xml
+
+# Autopilot runtime
+.autopilot_state.json
+execution_log*.json
+
+# Config (user-specific, template ships in autopilot/config.yaml)
+config.yaml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env files
+.env
+.env.local

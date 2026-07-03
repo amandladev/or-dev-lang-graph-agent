@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autopilot"
+version = "0.1.0"
+description = "Local developer workflow orchestration system"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=0.2.0",
+    "click>=8.1.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "hypothesis>=6.0",
+    "pytest>=7.0",
+]
+
+[project.scripts]
+autopilot = "autopilot.cli.commands:cli"
+
+[tool.setuptools.packages.find]
+include = ["autopilot*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
