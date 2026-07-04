@@ -49,7 +49,7 @@ class Application:
     config_command: ConfigCommand
 
 
-def create_application(config_path: str = "config.yaml") -> Application:
+def create_application(config_path: str = "auto") -> Application:
     """Wire all dependencies and return a configured Application.
 
     Follows the DI wiring pattern:
@@ -78,9 +78,12 @@ def create_application(config_path: str = "config.yaml") -> Application:
     jira_tool = JiraTool()
     git_tool = GitTool()
     github_tool = GitHubTool()
-    obsidian_tool = ObsidianTool()
+    obsidian_tool = ObsidianTool(vault_path=config.vault_location)
     playwright_tool = PlaywrightTool()
-    opencode_tool = OpenCodeTool()
+    opencode_tool = OpenCodeTool(
+        model=config.llm_model if "/" in config.llm_model else "",
+        timeout=config.timeout_seconds,
+    )
     filesystem_tool = FilesystemTool()
 
     # 3. Register tools

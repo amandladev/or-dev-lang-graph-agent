@@ -5,6 +5,19 @@ import sys
 from typing import Any
 
 
+def _truncate_dict(data: dict, max_str_len: int = 100) -> dict:
+    """Truncate long string values in a dict for display."""
+    result = {}
+    for k, v in data.items():
+        if isinstance(v, str) and len(v) > max_str_len:
+            result[k] = v[:max_str_len] + "..."
+        elif isinstance(v, list) and len(v) > 5:
+            result[k] = v[:5] + [f"... ({len(v) - 5} more)"]
+        else:
+            result[k] = v
+    return result
+
+
 class StructuredLogger:
     """Logger that emits structured agent execution output to the terminal.
 
@@ -56,7 +69,7 @@ class StructuredLogger:
             action: Description of the action being performed.
         """
         if self._verbosity in ("normal", "verbose"):
-            print(f"[{agent_name}] {action}")
+            print(f"  ▶ [{agent_name}] {action}")
 
     def log_agent_completion(
         self,
@@ -82,13 +95,23 @@ class StructuredLogger:
         is_error = status == "failed"
 
         if is_error or self._verbosity in ("normal", "verbose"):
-            print(f"[{agent_name}] completed in {elapsed_ms}ms — {status}")
+            if status == "success":
+                symbol = "✓"
+                color_code = "\033[32m"  # green
+            elif status == "failed":
+                symbol = "✗"
+                color_code = "\033[31m"  # red
+            else:
+                symbol = "○"
+                color_code = "\033[33m"  # yellow
+            reset = "\033[0m"
+            print(f"  {color_code}{symbol}{reset} [{agent_name}] {status} ({elapsed_ms}ms)")
 
         if self._verbosity == "verbose":
             if input_data is not None:
-                print(f"  input: {input_data}")
+                print(f"    input: {input_data}")
             if output_data is not None:
-                print(f"  output: {output_data}")
+                print(f"    output: {_truncate_dict(output_data)}")
 
     def log_retry(
         self,
@@ -130,9 +153,9 @@ class StructuredLogger:
             steps_skipped: Number of steps with skipped status.
         """
         print(
-            f"Summary: {total_duration_ms}ms total, "
-            f"{steps_executed} executed, "
-            f"{steps_failed} failed, "
+            f"\n  Summary: {total_duration_ms}ms total | "
+            f"{steps_executed} executed | "
+            f"{steps_failed} failed | "
             f"{steps_skipped} skipped"
         )
 
