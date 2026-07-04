@@ -11,6 +11,7 @@ from autopilot.domain.value_objects.exceptions import (
 )
 from autopilot.domain.value_objects.log_entry import LogEntry, StepStatus
 from autopilot.domain.value_objects.metrics import Metrics
+from autopilot.domain.value_objects.search_criteria import SearchCriteria
 
 __all__ = [
     "AuthenticationError",
@@ -21,6 +22,7 @@ __all__ = [
     "LogEntry",
     "Metrics",
     "SchemaViolationError",
+    "SearchCriteria",
     "StepStatus",
     "TestFailureError",
     "ToolTimeoutError",

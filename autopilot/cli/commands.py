@@ -90,6 +90,30 @@ def work(ticket_id: str, config_path: str, skip_validation: bool) -> None:
 
         execution_id = app.work_command.execute(ticket_id)
 
+        # Store experience from completed workflow
+        try:
+            from autopilot.infrastructure.adapters.json_serializer import JSONSerializer
+            import os
+
+            state_path = os.path.join(app.config.workspace_location, ".autopilot_state.json")
+            if os.path.exists(state_path):
+                serializer = JSONSerializer()
+                state = serializer.load(state_path)
+                state_dict = {
+                    "ticket": state.ticket,
+                    "plan": state.plan,
+                    "context": state.context,
+                    "evidence": state.evidence,
+                    "modified_files": state.modified_files,
+                    "errors": state.errors,
+                    "metrics": state.metrics,
+                }
+                experience = app.experience_builder.build(state_dict)
+                exp_id = app.knowledge_engine.store(experience)
+                click.secho(f"  💡 Experience stored: {exp_id[:8]}...", fg="blue", dim=True)
+        except Exception:
+            pass  # Experience storage failure shouldn't break the workflow report
+
         elapsed = time.time() - start_time
         click.echo()
         click.secho("─" * 50, dim=True)
