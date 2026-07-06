@@ -4,6 +4,7 @@ Wires all application dependencies using constructor injection and returns
 a configured Application object ready for CLI consumption.
 """
 
+import os
 from dataclasses import dataclass
 
 from autopilot.application.orchestrator.engine import OrchestrationEngine
@@ -32,6 +33,11 @@ from autopilot.infrastructure.tools.jira_tool import JiraTool
 from autopilot.infrastructure.tools.obsidian_tool import ObsidianTool
 from autopilot.infrastructure.tools.opencode_tool import OpenCodeTool
 from autopilot.infrastructure.tools.playwright_tool import PlaywrightTool
+from autopilot.infrastructure.knowledge.json_knowledge_engine import JsonKnowledgeEngine
+from autopilot.application.knowledge.experience_builder import ExperienceBuilder
+from autopilot.infrastructure.persistence.run_record_store import RunRecordStore
+from autopilot.infrastructure.persistence.ledger import Ledger
+from autopilot.infrastructure.persistence.ledger_committer import LedgerCommitter
 
 
 @dataclass
@@ -47,9 +53,14 @@ class Application:
     work_command: WorkCommand
     resume_command: ResumeCommand
     config_command: ConfigCommand
+    knowledge_engine: JsonKnowledgeEngine
+    experience_builder: ExperienceBuilder
+    run_record_store: RunRecordStore
+    ledger: Ledger
+    ledger_committer: LedgerCommitter
 
 
-def create_application(config_path: str = "config.yaml") -> Application:
+def create_application(config_path: str = "auto") -> Application:
     """Wire all dependencies and return a configured Application.
 
     Follows the DI wiring pattern:
@@ -78,9 +89,12 @@ def create_application(config_path: str = "config.yaml") -> Application:
     jira_tool = JiraTool()
     git_tool = GitTool()
     github_tool = GitHubTool()
-    obsidian_tool = ObsidianTool()
+    obsidian_tool = ObsidianTool(vault_path=config.vault_location)
     playwright_tool = PlaywrightTool()
-    opencode_tool = OpenCodeTool()
+    opencode_tool = OpenCodeTool(
+        model=config.llm_model if "/" in config.llm_model else "",
+        timeout=config.timeout_seconds,
+    )
     filesystem_tool = FilesystemTool()
 
     # 3. Register tools
@@ -96,8 +110,13 @@ def create_application(config_path: str = "config.yaml") -> Application:
     ]:
         tool_registry.register(tool)
 
-    # 4. Create agents (inject tools via constructor)
-    planner = PlannerAgent(tool_registry=tool_registry)
+    # 4. Create Knowledge Engine
+    knowledge_dir = os.path.join(config.workspace_location, "knowledge")
+    knowledge_engine = JsonKnowledgeEngine(storage_dir=knowledge_dir)
+    experience_builder = ExperienceBuilder()
+
+    # 5. Create agents (inject tools via constructor)
+    planner = PlannerAgent(tool_registry=tool_registry, knowledge_engine=knowledge_engine)
     context_builder = ContextBuilderAgent(tool_registry=tool_registry)
     code_executor = CodeExecutorAgent(tool_registry=tool_registry)
     reviewer = ReviewerAgent(tool_registry=tool_registry)
@@ -130,6 +149,11 @@ def create_application(config_path: str = "config.yaml") -> Application:
         backoff_multiplier=config.backoff_multiplier,
     )
 
+    # 6.1. Create persistence services
+    run_record_store = RunRecordStore(workspace=config.workspace_location)
+    ledger = Ledger(ledger_path=os.path.join(config.workspace_location, "ledger.json"))
+    ledger_committer = LedgerCommitter(workspace=config.workspace_location)
+
     # 7. Create orchestration engine
     engine = OrchestrationEngine(
         agent_registry=agent_registry,
@@ -137,6 +161,7 @@ def create_application(config_path: str = "config.yaml") -> Application:
         logger=logger,
         retry_policy=retry_policy,
         config=config,
+        run_record_store=run_record_store,
     )
 
     # 8. Create graph builder
@@ -164,4 +189,9 @@ def create_application(config_path: str = "config.yaml") -> Application:
         work_command=work_command,
         resume_command=resume_command,
         config_command=config_command,
+        knowledge_engine=knowledge_engine,
+        experience_builder=experience_builder,
+        run_record_store=run_record_store,
+        ledger=ledger,
+        ledger_committer=ledger_committer,
     )

@@ -1,0 +1,63 @@
+# Autopilot Configuration
+# =======================
+# This is the default configuration template for Autopilot.
+# Copy this file to your project root and adjust values before running.
+# All fields can be overridden via environment variables using the pattern:
+#   AUTOPILOT_<FIELD_NAME>  (e.g., AUTOPILOT_VAULT_LOCATION)
+
+# Path to your Obsidian vault or documentation root directory.
+# Required — must be set before running.
+# Override: AUTOPILOT_VAULT_LOCATION
+vault_location: ""
+
+# Path to the workspace directory where Autopilot stores state and output files.
+# Required — must be set before running.
+# Override: AUTOPILOT_WORKSPACE_LOCATION
+workspace_location: ""
+
+# List of Model Context Protocol (MCP) server identifiers available for tool use.
+# Constraint: maximum 20 entries.
+# Override: AUTOPILOT_AVAILABLE_MCPS (comma-separated list)
+available_mcps: []
+
+# LLM model identifier (e.g., "gpt-4", "claude-3-opus").
+# Constraint: maximum 100 characters.
+# Override: AUTOPILOT_LLM_MODEL
+llm_model: ""
+
+# LLM provider name (e.g., "openai", "anthropic").
+# Constraint: maximum 50 characters.
+# Override: AUTOPILOT_LLM_PROVIDER
+llm_provider: ""
+
+# Maximum time in seconds to wait for an agent or tool operation to complete.
+# Constraint: range [1, 600].
+# Default: 60
+# Override: AUTOPILOT_TIMEOUT_SECONDS
+timeout_seconds: 60
+
+# Maximum number of retry attempts for retryable errors.
+# Constraint: range [0, 10].
+# Default: 3
+# Override: AUTOPILOT_MAX_RETRIES
+max_retries: 3
+
+# Base delay in seconds between retry attempts (before backoff multiplier).
+# Default: 2.0
+# Override: AUTOPILOT_BASE_DELAY
+base_delay: 2.0
+
+# Multiplier applied to the base delay on each successive retry attempt.
+# Delay formula: base_delay * backoff_multiplier ^ attempt_number
+# Default: 2.0
+# Override: AUTOPILOT_BACKOFF_MULTIPLIER
+backoff_multiplier: 2.0
+
+# Logging verbosity level.
+# Allowed values: quiet | normal | verbose
+#   quiet   — emits only errors and the final summary
+#   normal  — emits agent start and completion entries
+#   verbose — additionally emits input and output data for each step
+# Default: normal
+# Override: AUTOPILOT_VERBOSITY
+verbosity: "normal"

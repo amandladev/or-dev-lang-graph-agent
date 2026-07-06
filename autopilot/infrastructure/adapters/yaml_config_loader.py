@@ -9,6 +9,16 @@ import yaml
 from autopilot.domain.entities.config import Config
 
 
+# Default config filename
+CONFIG_FILENAME = ".autopilot.yaml"
+
+# Search order for config file (first match wins)
+CONFIG_SEARCH_PATHS = [
+    Path.cwd() / CONFIG_FILENAME,           # 1. Current directory
+    Path.home() / CONFIG_FILENAME,           # 2. Home directory (global)
+]
+
+
 # Default config YAML content with inline comments
 _DEFAULT_CONFIG = """\
 # Autopilot Configuration
@@ -65,26 +75,31 @@ class YAMLConfigLoader:
     Implements ConfigLoaderInterface protocol.
     """
 
-    def load(self, path: str) -> Config:
+    def load(self, path: str = "") -> Config:
         """Load configuration from a YAML file.
 
-        If the file does not exist, creates a default config with inline
-        comments and raises SystemExit prompting the user to review it.
+        Search order when path is empty or "auto":
+        1. .autopilot.yaml in current working directory
+        2. ~/.autopilot.yaml in home directory (global config)
+
+        If no config is found anywhere, creates a default at ~/.autopilot.yaml
+        and raises SystemExit prompting the user to review it.
 
         Applies environment variable overrides using the pattern
         AUTOPILOT_<FIELD_NAME> (uppercase).
 
         Args:
             path: Filesystem path to the YAML configuration file.
+                If empty or "auto", searches default locations.
 
         Returns:
             A validated Config instance.
 
         Raises:
-            SystemExit: If the file does not exist (after creating default),
+            SystemExit: If no config exists (after creating default),
                 or if required fields are missing, or if validation fails.
         """
-        config_path = Path(path)
+        config_path = self._resolve_config_path(path)
 
         # If config file doesn't exist, create default and exit
         if not config_path.exists():
@@ -148,6 +163,29 @@ class YAMLConfigLoader:
         config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(config_path, "w") as f:
             f.write(_DEFAULT_CONFIG)
+
+    def _resolve_config_path(self, path: str) -> Path:
+        """Resolve the config file path.
+
+        If a specific path is given (not empty, not "auto"), use it directly.
+        Otherwise search the default locations in order.
+
+        Args:
+            path: Explicit path, or empty/"auto" for auto-discovery.
+
+        Returns:
+            Path to the config file (may not exist yet).
+        """
+        if path and path != "auto":
+            return Path(path)
+
+        # Search default locations
+        for candidate in CONFIG_SEARCH_PATHS:
+            if candidate.exists():
+                return candidate
+
+        # None found — will create at home directory (global)
+        return Path.home() / CONFIG_FILENAME
 
     def _apply_env_overrides(self, data: dict) -> dict:
         """Apply environment variable overrides to config data.
