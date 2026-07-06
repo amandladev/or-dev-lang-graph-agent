@@ -5,6 +5,7 @@ from typing import Any, Annotated, TypedDict
 
 from autopilot.domain.value_objects.error_record import ErrorRecord, ErrorType
 from autopilot.application.orchestrator.retry_policy import RetryPolicy
+from autopilot.domain.entities.run_record import RunRecord
 
 
 def append_list(existing: list, new: list) -> list:
@@ -45,6 +46,7 @@ class OrchestrationEngine:
         logger: Any,
         retry_policy: RetryPolicy,
         config: Any,
+        run_record_store: Any | None = None,
     ) -> None:
         """Initialize the orchestration engine.
 
@@ -54,12 +56,43 @@ class OrchestrationEngine:
             logger: Structured logger for execution observability.
             retry_policy: Policy for classifying errors and determining retries.
             config: Application configuration.
+            run_record_store: Optional store for persisting run records.
         """
         self._agent_registry = agent_registry
         self._serializer = serializer
         self._logger = logger
         self._retry_policy = retry_policy
         self._config = config
+        self._run_record_store = run_record_store
+
+    def create_run_record(self, ticket_id: str, ticket_title: str = "", mode: str = "live") -> RunRecord:
+        """Create a new RunRecord for tracking this execution.
+
+        Args:
+            ticket_id: The Jira ticket ID being processed.
+            ticket_title: Title of the Jira ticket.
+            mode: Execution mode ("live", "dry-run", "resume").
+
+        Returns:
+            The newly created RunRecord.
+        """
+        record = RunRecord(
+            ticket_id=ticket_id,
+            ticket_title=ticket_title,
+            mode=mode,
+        )
+        if self._run_record_store:
+            self._run_record_store.save(record)
+        return record
+
+    def update_run_record(self, record: RunRecord) -> None:
+        """Save the current state of a RunRecord.
+
+        Args:
+            record: The RunRecord to save.
+        """
+        if self._run_record_store:
+            self._run_record_store.save(record)
 
     def create_agent_node(self, agent_name: str):
         """Create a LangGraph node function for the named agent.
@@ -167,17 +200,59 @@ class OrchestrationEngine:
 
         return node
 
-    def execute(self, graph: Any, initial_state: dict) -> dict:
+    def execute(self, graph: Any, initial_state: dict, run_record: RunRecord | None = None) -> dict:
         """Execute a compiled LangGraph graph.
 
         Args:
             graph: A compiled LangGraph StateGraph ready for invocation.
             initial_state: The initial state dictionary to pass to the graph.
+            run_record: Optional RunRecord to update during execution.
 
         Returns:
             The final state dictionary after graph execution completes.
         """
-        return graph.invoke(initial_state)
+        try:
+            result = graph.invoke(initial_state)
+
+            # Update run record on success
+            if run_record:
+                # Extract test counts from evidence
+                test_results = [e for e in result.get("evidence", [])
+                               if e.get("type") == "test_result"]
+                tests_executed = len(test_results)
+                tests_passed = sum(1 for t in test_results
+                                  if t.get("result", "").upper().startswith("PASS"))
+
+                run_record.update_test_counts(
+                    executed=tests_executed,
+                    passed=tests_passed,
+                    failed=tests_executed - tests_passed,
+                )
+                run_record.modified_files = result.get("modified_files", [])
+
+                # Determine verdict based on errors and test results
+                errors = result.get("errors", [])
+                if errors:
+                    run_record.mark_failed(f"Workflow failed with {len(errors)} error(s)")
+                elif tests_executed > 0 and tests_passed == tests_executed:
+                    run_record.mark_completed("PASS")
+                elif tests_executed > 0:
+                    run_record.mark_completed("FAIL")
+                else:
+                    run_record.mark_completed("PASS")
+
+                if self._run_record_store:
+                    self._run_record_store.save(run_record)
+
+            return result
+
+        except Exception as exc:
+            # Update run record on failure
+            if run_record:
+                run_record.mark_failed(str(exc))
+                if self._run_record_store:
+                    self._run_record_store.save(run_record)
+            raise
 
     def _persist_state(self, current_state: dict, agent_output: dict) -> None:
         """Persist the merged state after a successful node completion.

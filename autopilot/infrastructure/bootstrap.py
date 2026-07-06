@@ -35,6 +35,9 @@ from autopilot.infrastructure.tools.opencode_tool import OpenCodeTool
 from autopilot.infrastructure.tools.playwright_tool import PlaywrightTool
 from autopilot.infrastructure.knowledge.json_knowledge_engine import JsonKnowledgeEngine
 from autopilot.application.knowledge.experience_builder import ExperienceBuilder
+from autopilot.infrastructure.persistence.run_record_store import RunRecordStore
+from autopilot.infrastructure.persistence.ledger import Ledger
+from autopilot.infrastructure.persistence.ledger_committer import LedgerCommitter
 
 
 @dataclass
@@ -52,6 +55,9 @@ class Application:
     config_command: ConfigCommand
     knowledge_engine: JsonKnowledgeEngine
     experience_builder: ExperienceBuilder
+    run_record_store: RunRecordStore
+    ledger: Ledger
+    ledger_committer: LedgerCommitter
 
 
 def create_application(config_path: str = "auto") -> Application:
@@ -143,6 +149,11 @@ def create_application(config_path: str = "auto") -> Application:
         backoff_multiplier=config.backoff_multiplier,
     )
 
+    # 6.1. Create persistence services
+    run_record_store = RunRecordStore(workspace=config.workspace_location)
+    ledger = Ledger(ledger_path=os.path.join(config.workspace_location, "ledger.json"))
+    ledger_committer = LedgerCommitter(workspace=config.workspace_location)
+
     # 7. Create orchestration engine
     engine = OrchestrationEngine(
         agent_registry=agent_registry,
@@ -150,6 +161,7 @@ def create_application(config_path: str = "auto") -> Application:
         logger=logger,
         retry_policy=retry_policy,
         config=config,
+        run_record_store=run_record_store,
     )
 
     # 8. Create graph builder
@@ -179,4 +191,7 @@ def create_application(config_path: str = "auto") -> Application:
         config_command=config_command,
         knowledge_engine=knowledge_engine,
         experience_builder=experience_builder,
+        run_record_store=run_record_store,
+        ledger=ledger,
+        ledger_committer=ledger_committer,
     )
