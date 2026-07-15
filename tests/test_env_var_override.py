@@ -24,6 +24,8 @@ from autopilot.infrastructure.adapters.yaml_config_loader import YAMLConfigLoade
 # ---------------------------------------------------------------------------
 
 # Non-empty strings for required path fields (vault_location, workspace_location)
+# Using yaml.safe_dump to write config, so we need to avoid YAML-special values
+# like 0, true, false, null, etc. Prefix with / to ensure they're treated as strings.
 non_empty_path_strategy = st.text(
     alphabet=st.characters(
         whitelist_categories=("L", "N"),
@@ -31,7 +33,7 @@ non_empty_path_strategy = st.text(
     ),
     min_size=1,
     max_size=30,
-).filter(lambda s: s.strip() != "")
+).filter(lambda s: s.strip() != "").map(lambda s: f"/path/{s}")
 
 # Generic string fields (llm_model max 100 chars, llm_provider max 50 chars)
 # Using yaml.safe_dump to write config, so any printable string is safe.

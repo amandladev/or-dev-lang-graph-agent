@@ -63,7 +63,9 @@ verbosity: normal
 """
 
 # Fields that must be present and non-empty in the config
-_REQUIRED_FIELDS = ("vault_location", "workspace_location")
+# workspace_location is auto-detected from CWD if empty
+# vault_location is optional (empty string if not set)
+_REQUIRED_FIELDS = ()
 
 # Mapping from config field name to environment variable name
 _ENV_VAR_PREFIX = "AUTOPILOT_"
@@ -128,6 +130,16 @@ class YAMLConfigLoader:
 
         # Apply environment variable overrides
         data = self._apply_env_overrides(data)
+
+        # workspace_location: env var > CWD (auto-detect)
+        # This ensures autopilot works from any project directory
+        # while still allowing explicit override via AUTOPILOT_WORKSPACE_LOCATION
+        if not data.get("workspace_location"):
+            data["workspace_location"] = str(Path.cwd())
+
+        # vault_location is optional — defaults to empty string
+        if not data.get("vault_location"):
+            data["vault_location"] = ""
 
         # Check required fields
         for field_name in _REQUIRED_FIELDS:

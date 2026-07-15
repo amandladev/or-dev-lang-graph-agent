@@ -5,10 +5,11 @@ the single source of truth for offline summary generation and auditing.
 """
 
 import json
-import os
 from pathlib import Path
 
 from autopilot.domain.entities.ledger_entry import LedgerEntry
+from autopilot.infrastructure.persistence.atomic_write import atomic_write_json
+from autopilot.infrastructure.persistence.file_lock import LedgerLock, lock_path_for
 
 
 class Ledger:
@@ -27,6 +28,7 @@ class Ledger:
             ledger_path: Path to the ledger.json file.
         """
         self._path = Path(ledger_path)
+        self._lock_path = lock_path_for(self._path)
 
     def load(self) -> list[dict]:
         """Load the ledger data.
@@ -46,8 +48,7 @@ class Ledger:
             data: List of ledger entry dictionaries.
         """
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        atomic_write_json(self._path, data)
 
     def append(self, entry: LedgerEntry, keep_all: bool = False) -> int:
         """Append or replace a ledger entry.
@@ -67,17 +68,20 @@ class Ledger:
         for w in warnings:
             print(f"WARN: {w}")
 
-        data = self.load()
+        with LedgerLock(self._lock_path):
+            data = self.load()
 
-        # Deduplicate by run_id unless keep_all
-        if not keep_all:
-            data = [r for r in data if r.get("run_id") != entry.run_id]
+            # Deduplicate by run_id unless keep_all
+            if not keep_all:
+                data = [r for r in data if r.get("run_id") != entry.run_id]
 
-        data.append(entry.to_dict())
-        data.sort(key=lambda r: (r.get("ticket_id", ""), r.get("timestamp", "")))
+            data.append(entry.to_dict())
+            data.sort(key=lambda r: (r.get("ticket_id", ""), r.get("timestamp", "")))
 
-        self.save(data)
-        return len(data)
+            self.save(data)
+            count = len(data)
+
+        return count
 
     def get_by_ticket(self, ticket_id: str) -> list[LedgerEntry]:
         """Get all ledger entries for a ticket.

@@ -75,6 +75,11 @@ class LedgerCommitter:
             # Return to previous branch
             self._run_git("checkout", "-", check=False)
 
+    def _is_git_repo(self) -> bool:
+        """Check if the workspace is a git repository."""
+        result = self._run_git("rev-parse", "--git-dir", check=False)
+        return result.returncode == 0
+
     def commitledger(
         self,
         ledger_path: str | Path,
@@ -94,6 +99,11 @@ class LedgerCommitter:
         Returns:
             True if commit was successful, False otherwise.
         """
+        # Check if workspace is a git repo
+        if not self._is_git_repo():
+            log.info("Not a git repository, skipping ledger commit")
+            return False
+
         try:
             # Save current branch
             current = self._run_git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()

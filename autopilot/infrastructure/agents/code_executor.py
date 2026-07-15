@@ -39,7 +39,7 @@ class CodeExecutorAgent:
 
     @property
     def output_schema(self) -> dict[str, type]:
-        return {"modified_files": list}
+        return {"modified_files": list, "evidence": list}
 
     def execute(
         self,
@@ -105,8 +105,15 @@ class CodeExecutorAgent:
 
             execution_log.append(step_result)
 
+        evidence = [{
+            "type": "execution_log",
+            "description": f"Code_Executor ran {len(execution_log)} plan step(s)",
+            "data": {"steps": execution_log},
+        }]
+
         return {
             "modified_files": list(set(modified_files)),  # deduplicate
+            "evidence": evidence,
         }
 
     def _build_execution_prompt(self, step: dict, plan: dict, context: dict) -> str:

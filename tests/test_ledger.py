@@ -157,3 +157,33 @@ class TestLedger:
 
         self.ledger.append(LedgerEntry(run_id="abc123", ticket_id="TEST-123"))
         assert self.ledger.size() == 1
+
+    def test_save_produces_valid_parseable_json_equal_to_data(self):
+        """**Validates: Requirements 1.6**
+
+        Ledger.save() produces valid JSON, parseable without error, and
+        equal to the data most recently saved.
+        """
+        data = [
+            {"run_id": "abc123", "ticket_id": "TEST-123", "status": "completed"},
+            {"run_id": "def456", "ticket_id": "TEST-456", "status": "failed"},
+        ]
+        self.ledger.save(data)
+
+        with open(self.ledger_path, encoding="utf-8") as f:
+            loaded = json.load(f)
+
+        assert loaded == data
+
+    def test_save_overwrites_previous_content_atomically(self):
+        """**Validates: Requirements 1.6**
+
+        A second save() call replaces the previous content with new content.
+        """
+        self.ledger.save([{"run_id": "one"}])
+        self.ledger.save([{"run_id": "two"}])
+
+        with open(self.ledger_path, encoding="utf-8") as f:
+            loaded = json.load(f)
+
+        assert loaded == [{"run_id": "two"}]

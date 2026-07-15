@@ -9,6 +9,7 @@ Rules are loaded from a specific file (.autopilot-rules.md) in the vault,
 with fallback to searching notes for relevant workflow information.
 """
 
+import re
 import subprocess
 import os
 from pathlib import Path
@@ -19,6 +20,9 @@ from autopilot.application.registries.tool_registry import ToolRegistry
 
 # Default rules file name in the vault
 RULES_FILENAME = ".autopilot-rules.md"
+
+_DISALLOWED_RUN = re.compile(r"[^a-z0-9]+")
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 
 class PublisherAgent:
@@ -133,7 +137,7 @@ class PublisherAgent:
                 if excerpt:
                     return self._parse_rules(excerpt)
 
-        except (KeyError, Exception):
+        except Exception:
             pass
 
         # Default rules if nothing found
@@ -191,6 +195,47 @@ class PublisherAgent:
             "push_remote": "origin",
         }
 
+    @staticmethod
+    def _sanitize_branch_slug(title: str) -> str:
+        """Convert a ticket title into a safe branch-name slug.
+
+        Lowercases the title, replaces any run of characters that are not
+        lowercase ASCII letters or digits with a single hyphen, trims
+        leading/trailing hyphens, falls back to "implementation" if the
+        result is empty, and truncates to 30 Unicode code points.
+
+        Args:
+            title: Raw ticket title.
+
+        Returns:
+            A slug composed only of lowercase alphanumerics and hyphens,
+            at most 30 code points long, never starting or ending with a
+            hyphen, and never empty.
+        """
+        lowered = title.lower()
+        collapsed = _DISALLOWED_RUN.sub("-", lowered)
+        trimmed = collapsed.strip("-")
+        slug = trimmed or "implementation"
+        truncated = slug[:30]
+        return truncated.rstrip("-") or "implementation"
+
+    @staticmethod
+    def _sanitize_commit_message(message: str) -> str:
+        """Strip control characters and newlines from a commit message.
+
+        Removes every character in U+0000-U+001F or U+007F (preserving
+        spaces), and substitutes "Automated commit" if the result is
+        empty or whitespace-only.
+
+        Args:
+            message: Raw, fully formatted commit message.
+
+        Returns:
+            A commit message with no control characters, never empty.
+        """
+        cleaned = _CONTROL_CHARS.sub("", message)
+        return cleaned if cleaned.strip() else "Automated commit"
+
     def _execute_git_workflow(
         self, ticket_id: str, ticket: dict, rules: dict
     ) -> dict[str, Any]:
@@ -206,57 +251,62 @@ class PublisherAgent:
         """
         results: dict[str, Any] = {"operations": []}
 
-        # Format branch name
-        description = ticket.get("title", "implementation").lower()
-        description = description.replace(" ", "-")[:30]
+        title = ticket.get("title", "implementation")
+        branch_slug = self._sanitize_branch_slug(title)
         branch_name = rules["branch_pattern"].format(
             ticket_id=ticket_id.lower(),
-            description=description,
+            description=branch_slug,
         )
+        results["branch"] = branch_name
 
         # 1. Checkout source branch and pull
         source = rules["branch_from"]
-        self._git_cmd(f"checkout {source}", results)
-        self._git_cmd("pull", results)
+        if not self._git_cmd(["checkout", source], results):
+            return results
+        if not self._git_cmd(["pull"], results):
+            return results
 
         # 2. Create feature branch
-        self._git_cmd(f"checkout -b {branch_name}", results)
+        if not self._git_cmd(["checkout", "-b", branch_name], results):
+            return results
 
         # 3. Stage all changes
-        self._git_cmd("add -A", results)
+        if not self._git_cmd(["add", "-A"], results):
+            return results
 
         # 4. Commit with conventional message
-        title = ticket.get("title", "Implementation")
-        commit_msg = rules["commit_pattern"].format(
+        raw_commit_msg = rules["commit_pattern"].format(
             ticket_id=ticket_id,
-            description=title,
+            description=ticket.get("title", "Implementation"),
         )
-        self._git_cmd(f'commit -m "{commit_msg}"', results)
+        commit_message = self._sanitize_commit_message(raw_commit_msg)
+        results["commit_message"] = commit_message
+        if not self._git_cmd(["commit", "-m", commit_message], results):
+            return results
 
         # 5. Push
         remote = rules["push_remote"]
-        self._git_cmd(f"push -u {remote} {branch_name}", results)
-
-        results["branch"] = branch_name
-        results["commit_message"] = commit_msg
+        if not self._git_cmd(["push", "-u", remote, branch_name], results):
+            return results
 
         return results
 
-    def _git_cmd(self, args: str, results: dict) -> bool:
+    def _git_cmd(self, args: list[str], results: dict) -> bool:
         """Execute a git command and log the result.
 
         Args:
-            args: Git arguments (e.g., "checkout develop").
+            args: Git arguments as separate list elements (e.g.,
+                ["checkout", "develop"]).
             results: Results dict to append operation log.
 
         Returns:
             True if command succeeded, False otherwise.
         """
+        command = ["git", *args]
         try:
-            cmd = f"git {args}"
             result = subprocess.run(
-                cmd,
-                shell=True,
+                command,
+                shell=False,
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -265,15 +315,15 @@ class PublisherAgent:
 
             success = result.returncode == 0
             results["operations"].append({
-                "command": cmd,
+                "command": command,
                 "success": success,
                 "output": result.stdout.strip() or result.stderr.strip(),
             })
             return success
 
-        except (subprocess.TimeoutExpired, Exception) as e:
+        except Exception as e:
             results["operations"].append({
-                "command": f"git {args}",
+                "command": command,
                 "success": False,
                 "output": str(e),
             })
@@ -301,10 +351,11 @@ class PublisherAgent:
         if not transition:
             return {"skipped": True, "reason": "No jira_transition rule configured"}
 
-        # For now, log what would be done (full Jira update API TBD)
+        # Full Jira update API not yet implemented — report as skipped so
+        # downstream metrics consumers don't mistake this for a real update.
         return {
-            "skipped": False,
+            "skipped": True,
             "ticket_id": ticket_id,
             "transition": transition,
-            "note": "Jira status transition not yet implemented — would transition to: " + transition,
+            "reason": "Jira update not yet implemented",
         }

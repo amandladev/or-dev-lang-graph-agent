@@ -8,6 +8,7 @@ import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -97,3 +98,69 @@ def validate_environment(config, ticket_id: str = "") -> ValidationResult:
         )
 
     return result
+
+
+def config_sanity_validator(config: Any) -> ValidationResult:
+    """Lightweight, fast sanity check of core configuration values.
+
+    Distinct from validate_environment: checks only that workspace_location
+    and vault_location are non-blank, and that workspace_location is
+    creatable. Does not check opencode/git/Jira availability and does not
+    create any directories as a side effect.
+
+    Args:
+        config: The loaded Config object.
+
+    Returns:
+        ValidationResult with errors and warnings.
+    """
+    result = ValidationResult()
+
+    workspace = config.workspace_location
+    vault = config.vault_location
+
+    if not workspace or not workspace.strip():
+        result.add_error("workspace_location must not be empty")
+
+    if not vault or not vault.strip():
+        result.add_error("vault_location must not be empty")
+
+    if workspace and workspace.strip():
+        creatable, reason = _is_creatable_path(workspace)
+        if not creatable:
+            result.add_error(f"workspace_location is not creatable: {reason}")
+
+    return result
+
+
+def _is_creatable_path(path_str: str) -> tuple[bool, str]:
+    """Check whether a path either already exists as a directory, or has a
+    writable existing ancestor, without creating anything.
+
+    Returns:
+        (True, "") if creatable, (False, reason) otherwise.
+    """
+    path = Path(path_str).expanduser()
+
+    try:
+        if path.exists():
+            if path.is_dir():
+                return True, ""
+            return False, f"'{path}' already exists and is not a directory"
+
+        ancestor = path.parent
+        while not ancestor.exists():
+            parent = ancestor.parent
+            if parent == ancestor:
+                return False, f"no existing ancestor directory found above '{path}'"
+            ancestor = parent
+
+        if not ancestor.is_dir():
+            return False, f"ancestor '{ancestor}' exists but is not a directory"
+
+        if not os.access(ancestor, os.W_OK):
+            return False, f"ancestor directory '{ancestor}' is not writable"
+
+        return True, ""
+    except OSError as exc:
+        return False, f"filesystem error while checking '{path}': {exc}"

@@ -6,10 +6,10 @@ JSON files in a structured directory layout:
 """
 
 import json
-import os
 from pathlib import Path
 
 from autopilot.domain.entities.run_record import RunRecord
+from autopilot.infrastructure.persistence.atomic_write import atomic_write_json
 
 
 class RunRecordStore:
@@ -44,9 +44,7 @@ class RunRecordStore:
         run_dir.mkdir(parents=True, exist_ok=True)
         path = run_dir / "run-record.json"
 
-        data = record.to_dict()
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        atomic_write_json(path, record.to_dict())
 
         return path
 
