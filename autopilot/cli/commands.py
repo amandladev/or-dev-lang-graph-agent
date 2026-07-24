@@ -248,7 +248,12 @@ def work(ticket_id: str, config_path: str, skip_validation: bool, dry_run: bool)
 @cli.command()
 def status() -> None:
     """Display the current workflow state."""
-    click.echo("Status: not implemented yet")
+    from autopilot.application.use_cases.status_command import StatusCommand
+
+    try:
+        click.echo(StatusCommand().execute())
+    except NotImplementedError:
+        click.echo("Status: not implemented yet")
 
 
 @cli.command()
@@ -312,7 +317,12 @@ def config(config_path: str) -> None:
 @cli.command()
 def review() -> None:
     """Initiate a review workflow for the current working context."""
-    click.echo("Review: not implemented yet")
+    from autopilot.application.use_cases.review_command import ReviewCommand
+
+    try:
+        click.echo(ReviewCommand().execute())
+    except NotImplementedError:
+        click.echo("Review: not implemented yet")
 
 
 @cli.command()
@@ -340,7 +350,7 @@ def ledger(config_path: str, ticket: str | None, limit: int) -> None:
                 click.echo(f"  {entry.run_id[:8]} | {entry.status} | {entry.verdict or '—'} | "
                           f"{entry.summary}")
         else:
-            summary = app.ledger.summary()
+            summary = app.ledger.summary(limit=limit)
             click.echo(summary)
 
     except SystemExit:

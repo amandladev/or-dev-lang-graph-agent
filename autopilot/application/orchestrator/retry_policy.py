@@ -43,6 +43,14 @@ class RetryPolicy:
         If it matches any retryable type (including subclasses), returns RETRYABLE.
         Otherwise returns NON_RETRYABLE.
 
+        Note: any exception that doesn't match RETRYABLE_EXCEPTIONS or
+        NON_RETRYABLE_EXCEPTIONS is classified NON_RETRYABLE as a safe
+        default (an unexpected error pauses the workflow rather than
+        silently retrying it). Use `is_recognized` to tell apart a
+        deliberately configured non-retryable business error (auth,
+        config, schema) from an unrecognized/likely-bug exception that
+        happens to fall into the same bucket.
+
         Args:
             exception: The exception instance to classify.
 
@@ -54,6 +62,22 @@ class RetryPolicy:
             if isinstance(exception, exc_type):
                 return ErrorType.RETRYABLE
         return ErrorType.NON_RETRYABLE
+
+    def is_recognized(self, exception: Exception) -> bool:
+        """Whether an exception type was explicitly declared in this policy.
+
+        Args:
+            exception: The exception instance to check.
+
+        Returns:
+            True if the exception matches (or subclasses) a type in either
+            RETRYABLE_EXCEPTIONS or NON_RETRYABLE_EXCEPTIONS. False means it
+            fell back to the NON_RETRYABLE default because it's an
+            unclassified/unexpected exception type — worth flagging
+            distinctly from deliberate business errors (auth/config/schema).
+        """
+        known = self.RETRYABLE_EXCEPTIONS | self.NON_RETRYABLE_EXCEPTIONS
+        return any(isinstance(exception, exc_type) for exc_type in known)
 
     def get_delay(self, attempt: int) -> float:
         """Calculate the delay before the next retry attempt using exponential backoff.

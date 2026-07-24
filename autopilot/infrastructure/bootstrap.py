@@ -119,6 +119,10 @@ def create_application(config_path: str = "auto") -> Application:
     planner = PlannerAgent(tool_registry=tool_registry, knowledge_engine=knowledge_engine)
     context_builder = ContextBuilderAgent(tool_registry=tool_registry)
     code_executor = CodeExecutorAgent(tool_registry=tool_registry)
+    # ReviewerAgent is registered for forward-compatibility with the future
+    # review workflow (see ReviewCommand / `autopilot review`), but it is a
+    # stub (execute() raises NotImplementedError) and has no node in any
+    # graph built by GraphBuilder yet — see build_review_graph().
     reviewer = ReviewerAgent(tool_registry=tool_registry)
     tester = TesterAgent(tool_registry=tool_registry)
     publisher = PublisherAgent(tool_registry=tool_registry)

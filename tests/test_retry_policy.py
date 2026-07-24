@@ -80,6 +80,40 @@ def test_unrecognized_exception_type_defaults_to_non_retryable(name_suffix: int,
 
 
 # ---------------------------------------------------------------------------
+# is_recognized: distinguishes deliberately configured non-retryable errors
+# from unclassified/unexpected exception types (Finding 14).
+# ---------------------------------------------------------------------------
+
+
+@settings(max_examples=50)
+@given(
+    exc_type=st.sampled_from(
+        sorted(
+            RetryPolicy.RETRYABLE_EXCEPTIONS | RetryPolicy.NON_RETRYABLE_EXCEPTIONS,
+            key=lambda t: t.__name__,
+        )
+    ),
+    message=st.text(max_size=50),
+)
+def test_is_recognized_true_for_explicitly_declared_types(exc_type: type, message: str):
+    policy = RetryPolicy(max_retries=3, base_delay=1.0, backoff_multiplier=2.0)
+    assert policy.is_recognized(exc_type(message)) is True
+
+
+@settings(max_examples=50)
+@given(
+    name_suffix=st.integers(min_value=0, max_value=1_000_000),
+    message=st.text(max_size=50),
+)
+def test_is_recognized_false_for_unrecognized_types(name_suffix: int, message: str):
+    policy = RetryPolicy(max_retries=3, base_delay=1.0, backoff_multiplier=2.0)
+    random_exc_type = type(f"RandomError{name_suffix}", (Exception,), {})
+    exc = random_exc_type(message)
+    assert policy.classify(exc) == ErrorType.NON_RETRYABLE
+    assert policy.is_recognized(exc) is False
+
+
+# ---------------------------------------------------------------------------
 # Property 16: Subclasses of retryable exceptions inherit retryable classification
 # Validates: Requirements 4.4
 # ---------------------------------------------------------------------------

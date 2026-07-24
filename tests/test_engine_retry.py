@@ -273,6 +273,57 @@ def test_non_retryable_persists_error_record_with_attempt_count_one(mock_sleep):
 
 
 # ---------------------------------------------------------------------------
+# Finding 14: unrecognized non-retryable exceptions are flagged distinctly
+# from deliberately configured business errors (auth/config/schema).
+# ---------------------------------------------------------------------------
+
+
+@patch("autopilot.application.orchestrator.engine.time.sleep")
+def test_unrecognized_exception_description_flagged_as_unclassified(mock_sleep):
+    exc = ValueError("some unexpected bug")  # not declared in either policy set
+    agent = _make_agent(side_effect=exc)
+    serializer = MagicMock()
+    engine = OrchestrationEngine(
+        agent_registry=_FakeRegistry(agent),
+        serializer=serializer,
+        logger=_FakeLogger(),
+        retry_policy=RetryPolicy(max_retries=3, base_delay=1.0, backoff_multiplier=2.0),
+        config=_FakeConfig(),
+    )
+    node = engine.create_agent_node("some_agent")
+
+    with pytest.raises(ValueError):
+        node({})
+
+    persisted_error = serializer.persist.call_args.args[0].errors[-1]
+    assert persisted_error["description"].startswith("[unclassified exception]")
+
+
+@patch("autopilot.application.orchestrator.engine.time.sleep")
+def test_recognized_non_retryable_exception_not_flagged_as_unclassified(mock_sleep):
+    from autopilot.domain.value_objects.exceptions import ConfigurationError
+
+    exc = ConfigurationError("missing vault_location")
+    agent = _make_agent(side_effect=exc)
+    serializer = MagicMock()
+    engine = OrchestrationEngine(
+        agent_registry=_FakeRegistry(agent),
+        serializer=serializer,
+        logger=_FakeLogger(),
+        retry_policy=RetryPolicy(max_retries=3, base_delay=1.0, backoff_multiplier=2.0),
+        config=_FakeConfig(),
+    )
+    node = engine.create_agent_node("some_agent")
+
+    with pytest.raises(ConfigurationError):
+        node({})
+
+    persisted_error = serializer.persist.call_args.args[0].errors[-1]
+    assert not persisted_error["description"].startswith("[unclassified exception]")
+    assert persisted_error["description"] == "missing vault_location"
+
+
+# ---------------------------------------------------------------------------
 # Property 5: Verdict reflects the pass/fail composition of test-result
 # evidence
 # Validates: Requirements 2.1, 2.2, 2.3

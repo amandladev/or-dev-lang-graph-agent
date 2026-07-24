@@ -154,7 +154,17 @@ class OrchestrationEngine:
                     error_type = self._retry_policy.classify(exc)
 
                     if error_type == ErrorType.NON_RETRYABLE:
-                        # Non-retryable: immediate pause, no retry
+                        # Non-retryable: immediate pause, no retry.
+                        # Distinguish a deliberately configured business
+                        # error (auth/config/schema) from an unrecognized
+                        # exception type that fell back to NON_RETRYABLE by
+                        # default — the latter is more likely a genuine
+                        # agent bug and deserves operator attention.
+                        recognized = self._retry_policy.is_recognized(exc)
+                        description = str(exc)
+                        if not recognized:
+                            description = f"[unclassified exception] {description}"
+
                         elapsed_ms = int((time.time() - start_time) * 1000)
                         self._logger.log_agent_completion(
                             agent_name=agent_name,
@@ -164,7 +174,7 @@ class OrchestrationEngine:
                         )
                         error_record = ErrorRecord(
                             error_type=ErrorType.NON_RETRYABLE,
-                            description=str(exc),
+                            description=description,
                             agent_name=agent_name,
                             attempt_count=attempt + 1,
                             exception_class=type(exc).__name__,

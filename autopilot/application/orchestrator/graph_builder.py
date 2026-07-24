@@ -78,6 +78,11 @@ class GraphBuilder:
     def build_review_graph(self):
         """Build the review workflow graph.
 
+        Not implemented yet: there is no "review" node in NODE_AGENT_MAP,
+        and ReviewerAgent.execute() is itself a stub. `autopilot review`
+        (ReviewCommand) surfaces this as a clear NotImplementedError rather
+        than silently no-op'ing.
+
         Raises:
             NotImplementedError: Review graph is not implemented in the MVP.
         """

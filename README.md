@@ -108,6 +108,12 @@ Crea `.autopilot-rules.md` en la raíz de tu vault de Obsidian:
 
 Si no existe este archivo, se usan reglas por defecto. También busca reglas en notas sueltas como fallback.
 
+**Nota:** `jira_transition` se lee y se refleja en las métricas del run (`metrics.jira_update`),
+pero el Publisher **todavía no llama la API de Jira** para aplicar la transición ni postear
+comentarios — `_update_jira` reporta `{"skipped": true}` de forma explícita. Usa
+`autopilot ledger`/el run record para confirmar el estado real; no asumas que el ticket
+cambió de status solo porque configuraste la regla.
+
 ### Override por variable de entorno
 
 Todos los campos del config soportan override:
@@ -251,7 +257,7 @@ python3 -m pytest tests/test_run_record.py -v
 python3 -m pytest tests/test_ledger.py -v
 ```
 
-Suite: **176 tests** (property tests + unit + integración).
+Suite: **319 tests** (property tests + unit + integración).
 
 ## Estructura del proyecto
 
@@ -282,19 +288,23 @@ autopilot/
 
 ## Roadmap — Qué falta para mejorar
 
+### Ya implementado (verificado en código, no en el roadmap original)
+
+- [x] **Sesiones de OpenCode**: `OpenCodeTool` usa `--continue` para mantener contexto entre pasos (`opencode_tool.py`)
+- [x] **Logging real en terminal**: `StructuredLogger` está conectado a `OrchestrationEngine` (`log_agent_start`/`log_agent_completion`/`log_retry`)
+- [x] **Output del workflow más detallado**: `autopilot work` imprime un reporte con archivos modificados, tests, errores y evidencia (`cli/commands.py`)
+- [x] **Workspace detection**: `workspace_location` se auto-detecta del CWD en `yaml_config_loader.py` (override vía `AUTOPILOT_WORKSPACE_LOCATION`)
+
 ### Prioridad Alta
 
-- [ ] **Sesiones de OpenCode**: Usar `--continue` para mantener contexto entre pasos del Code_Executor
-- [ ] **Logging real en terminal**: Conectar el StructuredLogger a la ejecución del grafo para ver progreso en tiempo real
-- [ ] **Validación pre-ejecución**: Verificar que opencode, git, y las credenciales están disponibles antes de iniciar
-- [ ] **Output del workflow más detallado**: Mostrar resumen final con archivos modificados, rama creada, tests pasados
+- [ ] **Validación pre-ejecución**: Verificar que opencode, git, y las credenciales están disponibles antes de iniciar (parcial: `validate_environment`/`config_sanity_validator` ya corren antes de `work`/`resume`/`config`/`ledger`, falta cubrir disponibilidad real del binario `opencode`)
+- [ ] **Jira transition real**: Publisher lee `jira_transition` pero no llama la API de Jira todavía (`_update_jira` siempre reporta `skipped`) — ver nota en "Reglas de workflow"
 
 ### Prioridad Media
 
 - [ ] **PR automático**: Publisher crea un PR en GitHub/GitLab después del push
-- [ ] **Reviewer agent**: Análisis de código pre-merge via OpenCode
+- [ ] **Reviewer agent**: Análisis de código pre-merge via OpenCode (agente y comando `review` son stubs conectados pero sin implementar; ver `ReviewCommand`/`build_review_graph`)
 - [ ] **Playwright tests**: Integrar tests E2E para proyectos con frontend
-- [ ] **Workspace detection**: Auto-detectar el `workspace_location` del directorio actual
 - [ ] **Multiple config merge**: Config global + config por proyecto (override específico)
 - [ ] **Failure diagnostics**: Usar LLM para generar diagnósticos de fallos para operadores
 
