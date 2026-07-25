@@ -5,6 +5,8 @@ Planner becomes a prompt sent to OpenCode, which performs the actual
 code modifications.
 """
 
+import subprocess
+from pathlib import Path
 from typing import Any, Optional
 
 from autopilot.application.registries.tool_registry import ToolRegistry
@@ -39,7 +41,7 @@ class CodeExecutorAgent:
 
     @property
     def output_schema(self) -> dict[str, type]:
-        return {"modified_files": list}
+        return {"modified_files": list, "evidence": list}
 
     def execute(
         self,
@@ -105,8 +107,24 @@ class CodeExecutorAgent:
 
             execution_log.append(step_result)
 
+        evidence = [{
+            "type": "execution_log",
+            "description": f"Code_Executor ran {len(execution_log)} plan step(s)",
+            "data": {"steps": execution_log},
+        }]
+
+        # Prefer the ground-truth list of files actually changed in the
+        # working tree over the free-text heuristic, which is likely to
+        # under- or over-report depending on OpenCode's exact output format.
+        git_files = self._git_modified_files()
+        if git_files is not None:
+            modified_files = git_files
+        else:
+            modified_files = list(set(modified_files))
+
         return {
-            "modified_files": list(set(modified_files)),  # deduplicate
+            "modified_files": modified_files,
+            "evidence": evidence,
         }
 
     def _build_execution_prompt(self, step: dict, plan: dict, context: dict) -> str:
@@ -159,3 +177,46 @@ Important:
                         files.append(path)
                         break
         return files
+
+    def _git_modified_files(self) -> list[str] | None:
+        """Get the list of files actually changed in the working tree via git.
+
+        Uses `git status --porcelain` as the ground truth for what OpenCode
+        modified, since parsing its free-text stdout is brittle. Covers
+        staged, unstaged, and untracked files, and correctly handles
+        renames (reports the new path).
+
+        Returns:
+            Sorted list of relative file paths changed in the working tree,
+            or None if the current directory is not a git repository (or
+            the command otherwise fails), so callers can fall back to the
+            text-heuristic result.
+        """
+        try:
+            result = subprocess.run(
+                ["git", "status", "--porcelain", "--untracked-files=all"],
+                shell=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=str(Path.cwd()),
+            )
+        except Exception:
+            return None
+
+        if result.returncode != 0:
+            return None
+
+        files: set[str] = set()
+        for line in result.stdout.splitlines():
+            if not line or len(line) < 4:
+                continue
+            path_part = line[3:]
+            # Renames are reported as "old -> new"; keep the new path.
+            if " -> " in path_part:
+                path_part = path_part.split(" -> ", 1)[1]
+            path_part = path_part.strip().strip('"')
+            if path_part:
+                files.add(path_part)
+
+        return sorted(files)

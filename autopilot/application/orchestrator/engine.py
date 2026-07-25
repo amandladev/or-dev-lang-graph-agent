@@ -120,8 +120,9 @@ class OrchestrationEngine:
             # Retrieve optional memory context from state metadata
             memory_context = state.get("metadata")
 
-            # Log agent start
-            self._logger.log_agent_start(agent_name, "executing")
+            # Generate a meaningful start message based on agent type
+            start_details = self._get_agent_start_details(agent_name, input_data)
+            self._logger.log_agent_start(agent_name, start_details["action"], start_details.get("details"))
 
             start_time = time.time()
             last_exception: Exception | None = None
@@ -131,14 +132,16 @@ class OrchestrationEngine:
                 try:
                     output = agent.execute(input_data, memory_context=memory_context)
 
-                    # Success: log completion
+                    # Success: log completion with summary
                     elapsed_ms = int((time.time() - start_time) * 1000)
+                    summary = self._get_agent_summary(agent_name, output)
                     self._logger.log_agent_completion(
                         agent_name=agent_name,
                         elapsed_ms=elapsed_ms,
                         status="success",
                         input_data=input_data,
                         output_data=output,
+                        summary=summary,
                     )
 
                     # Persist state after successful node completion
@@ -151,16 +154,27 @@ class OrchestrationEngine:
                     error_type = self._retry_policy.classify(exc)
 
                     if error_type == ErrorType.NON_RETRYABLE:
-                        # Non-retryable: immediate pause, no retry
+                        # Non-retryable: immediate pause, no retry.
+                        # Distinguish a deliberately configured business
+                        # error (auth/config/schema) from an unrecognized
+                        # exception type that fell back to NON_RETRYABLE by
+                        # default — the latter is more likely a genuine
+                        # agent bug and deserves operator attention.
+                        recognized = self._retry_policy.is_recognized(exc)
+                        description = str(exc)
+                        if not recognized:
+                            description = f"[unclassified exception] {description}"
+
                         elapsed_ms = int((time.time() - start_time) * 1000)
                         self._logger.log_agent_completion(
                             agent_name=agent_name,
                             elapsed_ms=elapsed_ms,
                             status="failed",
+                            summary=f"Error: {str(exc)[:100]}",
                         )
                         error_record = ErrorRecord(
                             error_type=ErrorType.NON_RETRYABLE,
-                            description=str(exc),
+                            description=description,
                             agent_name=agent_name,
                             attempt_count=attempt + 1,
                             exception_class=type(exc).__name__,
@@ -335,7 +349,74 @@ class OrchestrationEngine:
             storage_path = getattr(self._config, "workspace_location", ".")
             filepath = f"{storage_path}/.autopilot_state.json"
             self._serializer.persist(workflow_state, filepath)
-        except Exception:
-            # State persistence failure should not crash the workflow
-            # The logger would record this, but we continue execution
-            pass
+        except Exception as exc:
+            # State persistence failure should not crash the workflow,
+            # but it must not be invisible either.
+            self._logger.log_warning(
+                f"Failed to persist workflow state: {exc}"
+            )
+
+    def _get_agent_start_details(self, agent_name: str, input_data: dict) -> dict:
+        """Generate meaningful start details based on agent type.
+
+        Args:
+            agent_name: The name of the agent.
+            input_data: The input data for the agent.
+
+        Returns:
+            Dict with 'action' and optional 'details'.
+        """
+        ticket_id = input_data.get("ticket", {}).get("id", "") if isinstance(input_data.get("ticket"), dict) else ""
+
+        if agent_name == "context_builder":
+            return {"action": f"fetching ticket {ticket_id} and vault context"}
+        elif agent_name == "planner":
+            return {"action": f"generating implementation plan for {ticket_id}"}
+        elif agent_name == "code_executor":
+            plan = input_data.get("plan", {})
+            steps = plan.get("steps", []) if isinstance(plan, dict) else []
+            return {"action": f"executing {len(steps)} plan steps"}
+        elif agent_name == "tester":
+            files = input_data.get("modified_files", [])
+            return {"action": f"testing {len(files)} modified files"}
+        elif agent_name == "publisher":
+            files = input_data.get("modified_files", [])
+            return {"action": f"publishing {len(files)} files to git"}
+        elif agent_name == "documentation":
+            return {"action": "generating workflow documentation"}
+        else:
+            return {"action": "executing"}
+
+    def _get_agent_summary(self, agent_name: str, output: dict) -> str:
+        """Generate a meaningful summary based on agent output.
+
+        Args:
+            agent_name: The name of the agent.
+            output: The output from the agent.
+
+        Returns:
+            Summary string.
+        """
+        if agent_name == "context_builder":
+            ticket = output.get("ticket", {})
+            title = ticket.get("title", "") if isinstance(ticket, dict) else ""
+            return f"Ticket: {title[:50]}" if title else "Context loaded"
+        elif agent_name == "planner":
+            plan = output.get("plan", {})
+            steps = plan.get("steps", []) if isinstance(plan, dict) else []
+            return f"Plan with {len(steps)} steps"
+        elif agent_name == "code_executor":
+            files = output.get("modified_files", [])
+            return f"Modified {len(files)} files: {', '.join(f.split('/')[-1] for f in files[:3])}" if files else "No files modified"
+        elif agent_name == "tester":
+            evidence = output.get("evidence", [])
+            tests = [e for e in evidence if e.get("type") == "test_result"]
+            passed = sum(1 for t in tests if "pass" in str(t.get("data", {}).get("result", "")).lower())
+            return f"{passed}/{len(tests)} tests passed" if tests else "No tests found"
+        elif agent_name == "publisher":
+            files = output.get("modified_files", [])
+            return f"Committed {len(files)} files"
+        elif agent_name == "documentation":
+            return "Documentation generated"
+        else:
+            return "Completed"

@@ -75,6 +75,11 @@ class LedgerCommitter:
             # Return to previous branch
             self._run_git("checkout", "-", check=False)
 
+    def _is_git_repo(self) -> bool:
+        """Check if the workspace is a git repository."""
+        result = self._run_git("rev-parse", "--git-dir", check=False)
+        return result.returncode == 0
+
     def commitledger(
         self,
         ledger_path: str | Path,
@@ -94,6 +99,13 @@ class LedgerCommitter:
         Returns:
             True if commit was successful, False otherwise.
         """
+        # Check if workspace is a git repo
+        if not self._is_git_repo():
+            log.info("Not a git repository, skipping ledger commit")
+            return False
+
+        current: str | None = None
+
         try:
             # Save current branch
             current = self._run_git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
@@ -133,9 +145,13 @@ class LedgerCommitter:
 
         except subprocess.CalledProcessError as e:
             log.error("Git error: %s", e.stderr)
-            # Try to return to original branch
+            # Try to return to the branch we were actually on before this
+            # call started. Falling back to "checkout -" here would toggle
+            # to whatever branch git considers "previous", which is not
+            # necessarily `current` and can strand the repo on
+            # BRANCH_NAME after a failure.
             try:
-                self._run_git("checkout", "-", check=False)
+                self._run_git("checkout", current if current else "-", check=False)
             except Exception:
                 pass
             return False

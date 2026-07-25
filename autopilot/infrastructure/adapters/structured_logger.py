@@ -57,7 +57,7 @@ class StructuredLogger:
         """Return the configured log directory."""
         return self._log_dir
 
-    def log_agent_start(self, agent_name: str, action: str) -> None:
+    def log_agent_start(self, agent_name: str, action: str, details: dict | None = None) -> None:
         """Emit a log entry when an agent begins execution.
 
         Format: [Agent_Name] action description
@@ -67,9 +67,14 @@ class StructuredLogger:
         Args:
             agent_name: The registered agent name.
             action: Description of the action being performed.
+            details: Optional additional details to display.
         """
         if self._verbosity in ("normal", "verbose"):
             print(f"  ▶ [{agent_name}] {action}")
+            if details and self._verbosity == "verbose":
+                for k, v in details.items():
+                    if v:
+                        print(f"    {k}: {str(v)[:100]}")
 
     def log_agent_completion(
         self,
@@ -78,6 +83,7 @@ class StructuredLogger:
         status: str,
         input_data: dict[str, Any] | None = None,
         output_data: dict[str, Any] | None = None,
+        summary: str | None = None,
     ) -> None:
         """Emit a log entry when an agent completes execution.
 
@@ -91,6 +97,7 @@ class StructuredLogger:
             status: One of "success", "failed", or "skipped".
             input_data: Optional input data (shown at verbose level).
             output_data: Optional output data (shown at verbose level).
+            summary: Optional summary string to display.
         """
         is_error = status == "failed"
 
@@ -106,6 +113,8 @@ class StructuredLogger:
                 color_code = "\033[33m"  # yellow
             reset = "\033[0m"
             print(f"  {color_code}{symbol}{reset} [{agent_name}] {status} ({elapsed_ms}ms)")
+            if summary:
+                print(f"    {summary}")
 
         if self._verbosity == "verbose":
             if input_data is not None:
@@ -134,6 +143,18 @@ class StructuredLogger:
             f"[{agent_name}] retry {attempt}/{max_attempts} — {error}",
             file=sys.stderr,
         )
+
+    def log_warning(self, message: str) -> None:
+        """Emit a warning log entry.
+
+        Always emitted regardless of verbosity level, since warnings
+        indicate conditions the user should be aware of (e.g. a
+        non-fatal persistence failure).
+
+        Args:
+            message: The warning message to display.
+        """
+        print(f"  ⚠ {message}", file=sys.stderr)
 
     def log_summary(
         self,

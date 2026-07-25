@@ -8,12 +8,12 @@
 # Path to your Obsidian vault or documentation root directory.
 # Required — must be set before running.
 # Override: AUTOPILOT_VAULT_LOCATION
-vault_location: ""
+vault_location: "/Users/sergioreyes/Documents/sergio/obsidian/wts-vault"
 
 # Path to the workspace directory where Autopilot stores state and output files.
 # Required — must be set before running.
 # Override: AUTOPILOT_WORKSPACE_LOCATION
-workspace_location: ""
+workspace_location: "/Users/sergioreyes/Documents/dfx5/wts"
 
 # List of Model Context Protocol (MCP) server identifiers available for tool use.
 # Constraint: maximum 20 entries.

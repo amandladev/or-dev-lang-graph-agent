@@ -5,10 +5,11 @@ the single source of truth for offline summary generation and auditing.
 """
 
 import json
-import os
 from pathlib import Path
 
 from autopilot.domain.entities.ledger_entry import LedgerEntry
+from autopilot.infrastructure.persistence.atomic_write import atomic_write_json
+from autopilot.infrastructure.persistence.file_lock import LedgerLock, lock_path_for
 
 
 class Ledger:
@@ -27,6 +28,7 @@ class Ledger:
             ledger_path: Path to the ledger.json file.
         """
         self._path = Path(ledger_path)
+        self._lock_path = lock_path_for(self._path)
 
     def load(self) -> list[dict]:
         """Load the ledger data.
@@ -46,8 +48,7 @@ class Ledger:
             data: List of ledger entry dictionaries.
         """
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        atomic_write_json(self._path, data)
 
     def append(self, entry: LedgerEntry, keep_all: bool = False) -> int:
         """Append or replace a ledger entry.
@@ -67,17 +68,20 @@ class Ledger:
         for w in warnings:
             print(f"WARN: {w}")
 
-        data = self.load()
+        with LedgerLock(self._lock_path):
+            data = self.load()
 
-        # Deduplicate by run_id unless keep_all
-        if not keep_all:
-            data = [r for r in data if r.get("run_id") != entry.run_id]
+            # Deduplicate by run_id unless keep_all
+            if not keep_all:
+                data = [r for r in data if r.get("run_id") != entry.run_id]
 
-        data.append(entry.to_dict())
-        data.sort(key=lambda r: (r.get("ticket_id", ""), r.get("timestamp", "")))
+            data.append(entry.to_dict())
+            data.sort(key=lambda r: (r.get("ticket_id", ""), r.get("timestamp", "")))
 
-        self.save(data)
-        return len(data)
+            self.save(data)
+            count = len(data)
+
+        return count
 
     def get_by_ticket(self, ticket_id: str) -> list[LedgerEntry]:
         """Get all ledger entries for a ticket.
@@ -111,24 +115,36 @@ class Ledger:
                 return LedgerEntry.from_dict(r)
         return None
 
-    def summary(self) -> str:
+    def summary(self, limit: int | None = None) -> str:
         """Generate a consolidated Markdown summary of all entries.
+
+        Aggregated stats (totals, pass rate) are always computed over the
+        full ledger. `limit` only caps how many entries are listed in the
+        per-run table and per-ticket detail sections, so the report stays
+        readable as the ledger grows without losing overall accuracy.
+
+        Args:
+            limit: Maximum number of most-recent entries to list in the
+                table/detail sections. None (default) lists all entries.
 
         Returns:
             Markdown string with the summary report.
         """
         data = self.load()
+        displayed = data if limit is None else data[-limit:]
         lines: list[str] = []
         w = lines.append
 
         w("# Autopilot — Resumen de ejecuciones\n")
-        w(f"Generado desde `{self._path.name}` · {len(data)} ejecución(es)\n")
+        w(f"Generado desde `{self._path.name}` · {len(data)} ejecución(es)"
+          + (f" · mostrando {len(displayed)}" if limit is not None and len(displayed) < len(data) else "")
+          + "\n")
 
         # 1. Status table
         w("## Estado por ejecución\n")
         w("| Run ID | Ticket | Título | Estado | Veredicto | Archivos | Duración |")
         w("|--------|--------|--------|--------|-----------|----------|----------|")
-        for r in data:
+        for r in displayed:
             v = r.get("verdict", "—")
             dur = f"{r.get('duration_seconds', 0)}s" if r.get("duration_seconds") else "—"
             files = len(r.get("modified_files", []))
@@ -137,7 +153,7 @@ class Ledger:
               f"{v} | {files} | {dur} |")
         w("")
 
-        # 2. Aggregated stats
+        # 2. Aggregated stats (always over the full ledger)
         total = len(data)
         completed = sum(1 for r in data if r.get("status") == "completed")
         failed = sum(1 for r in data if r.get("status") == "failed")
@@ -156,7 +172,7 @@ class Ledger:
 
         # 3. Per-ticket detail
         w("## Detalle por ejecución\n")
-        for r in data:
+        for r in displayed:
             v = r.get("verdict", "—")
             dur = f"{r.get('duration_seconds', 0)}s" if r.get("duration_seconds") else "—"
             w(f"### `{r.get('run_id', '')[:8]}` — {r.get('ticket_id', '')} {r.get('ticket_title', '')}\n")
