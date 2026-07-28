@@ -1,7 +1,5 @@
 """Tests for RunRecord entity and RunRecordStore."""
 
-import json
-import os
 import tempfile
 
 import pytest

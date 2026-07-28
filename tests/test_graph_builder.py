@@ -11,9 +11,9 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from autopilot.application.orchestrator.graph_builder import (
-    GraphBuilder,
     NODE_AGENT_MAP,
     WORK_GRAPH_NODES,
+    GraphBuilder,
 )
 
 

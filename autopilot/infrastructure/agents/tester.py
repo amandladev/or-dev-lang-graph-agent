@@ -4,10 +4,10 @@ Detects the project type (Node.js/Python/etc.) and runs the appropriate
 test suite. Reports results as evidence for the Publisher.
 """
 
-import subprocess
 import os
+import subprocess
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from autopilot.application.registries.tool_registry import ToolRegistry
 
@@ -46,7 +46,7 @@ class TesterAgent:
     def execute(
         self,
         state: dict[str, Any],
-        memory_context: Optional[dict[str, Any]] = None,
+        memory_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run the test suite and report results.
 

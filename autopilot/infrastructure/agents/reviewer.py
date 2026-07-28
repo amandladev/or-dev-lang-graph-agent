@@ -1,6 +1,6 @@
 """Reviewer agent stub implementation."""
 
-from typing import Any, Optional
+from typing import Any
 
 from autopilot.application.registries.tool_registry import ToolRegistry
 
@@ -43,7 +43,7 @@ class ReviewerAgent:
     def execute(
         self,
         state: dict[str, Any],
-        memory_context: Optional[dict[str, Any]] = None,
+        memory_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Execute the reviewer agent's task.
 

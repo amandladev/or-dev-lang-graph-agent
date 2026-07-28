@@ -19,7 +19,6 @@ from autopilot.domain.value_objects.evidence import EvidenceItem
 from autopilot.domain.value_objects.log_entry import LogEntry, StepStatus
 from autopilot.infrastructure.adapters.json_serializer import JSONSerializer
 
-
 # ---------------------------------------------------------------------------
 # Strategies
 # ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 """JSON serializer for WorkflowState persistence."""
 
-import json
 import dataclasses
+import json
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -11,6 +11,8 @@ from autopilot.domain.entities.workflow_state import WorkflowState
 from autopilot.domain.value_objects.error_record import ErrorRecord, ErrorType
 from autopilot.domain.value_objects.evidence import EvidenceItem
 from autopilot.domain.value_objects.log_entry import LogEntry, StepStatus
+from autopilot.infrastructure.persistence.atomic_write import atomic_write_text
+from autopilot.infrastructure.persistence.file_lock import LedgerLock, lock_path_for
 
 
 class DeserializationError(Exception):
@@ -230,6 +232,10 @@ class JSONSerializer:
     def persist(self, state: WorkflowState, filepath: str | Path) -> None:
         """Persist a WorkflowState to a JSON file.
 
+        Writes atomically (temp file + os.replace) under an exclusive file
+        lock, so a crash mid-write or a concurrent persist/load never leaves
+        or observes a partially-written state file.
+
         Args:
             state: The WorkflowState to persist.
             filepath: Path to the output file.
@@ -237,7 +243,8 @@ class JSONSerializer:
         filepath = Path(filepath)
         filepath.parent.mkdir(parents=True, exist_ok=True)
         json_str = self.serialize(state)
-        filepath.write_text(json_str, encoding="utf-8")
+        with LedgerLock(lock_path_for(filepath)):
+            atomic_write_text(filepath, json_str)
 
     def load(self, filepath: str | Path) -> WorkflowState:
         """Load a WorkflowState from a JSON file.

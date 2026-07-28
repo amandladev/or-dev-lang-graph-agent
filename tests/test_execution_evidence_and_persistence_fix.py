@@ -22,7 +22,6 @@ from autopilot.infrastructure.agents.code_executor import CodeExecutorAgent
 from autopilot.infrastructure.agents.publisher import PublisherAgent
 from autopilot.infrastructure.agents.reviewer import ReviewerAgent
 
-
 # ---------------------------------------------------------------------------
 # Code_Executor: execution log returned as evidence
 # ---------------------------------------------------------------------------
@@ -108,7 +107,7 @@ class _FakeRegistry:
 
 class _FailingSerializer:
     def persist(self, state, filepath):
-        raise IOError("disk full")
+        raise OSError("disk full")
 
 
 class _FakeConfig:

@@ -16,7 +16,6 @@ from hypothesis import strategies as st
 from autopilot.domain.value_objects.exceptions import TestFailureError
 from autopilot.infrastructure.agents.tester import TesterAgent
 
-
 # ---------------------------------------------------------------------------
 # 5.1 (example): no test framework detected -> skipped, no subprocess.run call
 # Validates: Requirements 5.1

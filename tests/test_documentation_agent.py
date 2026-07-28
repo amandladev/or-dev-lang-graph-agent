@@ -10,7 +10,6 @@ from hypothesis import strategies as st
 
 from autopilot.infrastructure.agents.documentation import DocumentationAgent
 
-
 _agent = DocumentationAgent(tool_registry=MagicMock())
 
 description_strategy = st.text(min_size=1, max_size=20).filter(lambda s: s.strip() != "")

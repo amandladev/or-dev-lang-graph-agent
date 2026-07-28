@@ -1,11 +1,11 @@
 """LangGraph orchestration engine and state schema."""
 
 import time
-from typing import Any, Annotated, TypedDict
+from typing import Annotated, Any, TypedDict
 
-from autopilot.domain.value_objects.error_record import ErrorRecord, ErrorType
 from autopilot.application.orchestrator.retry_policy import RetryPolicy
 from autopilot.domain.entities.run_record import RunRecord
+from autopilot.domain.value_objects.error_record import ErrorRecord, ErrorType
 
 
 def append_list(existing: list, new: list) -> list:
@@ -407,7 +407,10 @@ class OrchestrationEngine:
             return f"Plan with {len(steps)} steps"
         elif agent_name == "code_executor":
             files = output.get("modified_files", [])
-            return f"Modified {len(files)} files: {', '.join(f.split('/')[-1] for f in files[:3])}" if files else "No files modified"
+            if not files:
+                return "No files modified"
+            names = ", ".join(f.split("/")[-1] for f in files[:3])
+            return f"Modified {len(files)} files: {names}"
         elif agent_name == "tester":
             evidence = output.get("evidence", [])
             tests = [e for e in evidence if e.get("type") == "test_result"]

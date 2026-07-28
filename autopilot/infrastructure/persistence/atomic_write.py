@@ -52,6 +52,43 @@ def atomic_write_json(path: str | Path, data: Any, *, indent: int = 2) -> None:
     os.replace(tmp_path, destination)
 
 
+def atomic_write_text(path: str | Path, text: str, *, encoding: str = "utf-8") -> None:
+    """Write `text` to `path` atomically.
+
+    Same crash-safety guarantees as atomic_write_json, but for callers that
+    already have a serialized string (e.g. a custom JSON encoder) instead of
+    a JSON-serializable object.
+
+    Args:
+        path: Destination file path.
+        text: Text content to write.
+        encoding: Text encoding to use.
+
+    Raises:
+        OSError: If a filesystem error occurs while writing or replacing.
+    """
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    fd, tmp_name = tempfile.mkstemp(
+        dir=destination.parent,
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+    )
+    tmp_path = Path(tmp_name)
+
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+    except Exception:
+        _remove_if_exists(tmp_path)
+        raise
+
+    os.replace(tmp_path, destination)
+
+
 def _remove_if_exists(path: Path) -> None:
     try:
         os.remove(path)

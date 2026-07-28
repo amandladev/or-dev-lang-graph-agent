@@ -30,6 +30,8 @@ coverage.xml
 
 # Autopilot runtime
 .autopilot_state.json
+.autopilot_run.lock
+*.lock
 execution_log*.json
 
 # Config (user-specific, template ships in autopilot/config.yaml)
@@ -42,3 +44,5 @@ Thumbs.db
 # Env files
 .env
 .env.local
+
+.kiro

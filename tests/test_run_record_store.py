@@ -13,7 +13,6 @@ from hypothesis import strategies as st
 from autopilot.domain.entities.run_record import RunRecord
 from autopilot.infrastructure.persistence.run_record_store import RunRecordStore
 
-
 run_id_strategy = st.from_regex(r"[A-Za-z0-9_-]{1,20}", fullmatch=True)
 
 

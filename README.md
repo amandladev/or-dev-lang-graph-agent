@@ -4,6 +4,55 @@ Sistema local de orquestación de flujos de trabajo para desarrolladores. Autopi
 
 Autopilot **no es** un asistente de código. Es un orquestador que coordina herramientas existentes (OpenCode, Jira, Git, etc.) mediante una arquitectura basada en agentes, ejecutándose completamente en macOS sin dependencias de infraestructura cloud.
 
+## Índice
+
+- [Quick Start](#quick-start)
+- [Arquitectura](#arquitectura)
+- [Requisitos](#requisitos)
+- [Instalación](#instalación)
+- [Configuración](#configuración)
+- [Uso — Referencia de comandos](#uso)
+- [Agentes](#agentes)
+- [Herramientas](#herramientas)
+- [Persistencia y Auditoría](#persistencia-y-auditoría)
+- [Manejo de errores](#manejo-de-errores)
+- [Solución de problemas](#solución-de-problemas)
+- [Tests](#tests)
+- [Estructura del proyecto](#estructura-del-proyecto)
+- [Roadmap](#roadmap--qué-falta-para-mejorar)
+
+## Quick Start
+
+Para alguien que ya tiene `opencode` instalado y quiere correr su primer ticket:
+
+```bash
+# 1. Instalar autopilot (una sola vez)
+cd or-dev-langchain-agent
+pip3 install -e .
+
+# 2. Crear config global (una sola vez)
+cp autopilot/.autopilot.yaml.template ~/.autopilot.yaml
+# Edita ~/.autopilot.yaml: vault_location, llm_model, llm_provider
+
+# 3. Exportar credenciales de Jira para la instancia del ticket
+#    (el prefijo del ticket define la instancia: PROJ-123 -> JIRA_PROJ_*)
+export JIRA_PROJ_URL="https://tu-dominio.atlassian.net"
+export JIRA_PROJ_EMAIL="tu@email.com"
+export JIRA_PROJ_TOKEN="tu-api-token"
+
+# 4. Pararte en el repo del proyecto que quieres modificar
+cd /ruta/a/tu/proyecto
+
+# 5. Correr en dry-run primero para validar el entorno sin tocar nada
+autopilot work PROJ-123 --dry-run
+
+# 6. Si todo se ve bien, correr en modo real
+autopilot work PROJ-123
+```
+
+Si algo falla en el paso 5/6, revisa [Solución de problemas](#solución-de-problemas) —
+`autopilot work` valida el entorno antes de arrancar y explica qué falta.
+
 ## Arquitectura
 
 El proyecto sigue principios de **Clean Architecture** con tres capas bien definidas:
@@ -81,16 +130,16 @@ El loader busca config en este orden:
 
 ```bash
 # Una instancia por cada proyecto/dominio
-export JIRA_CULQI_URL="https://tu-dominio.atlassian.net"
-export JIRA_CULQI_EMAIL="tu@email.com"
-export JIRA_CULQI_TOKEN="tu-api-token"
+export JIRA_PROJ_URL="https://tu-dominio.atlassian.net"
+export JIRA_PROJ_EMAIL="tu@email.com"
+export JIRA_PROJ_TOKEN="tu-api-token"
 
-export JIRA_WTS_URL="https://otro-dominio.atlassian.net"
-export JIRA_WTS_EMAIL="tu@email.com"
-export JIRA_WTS_TOKEN="otro-token"
+export JIRA_ACME_URL="https://otro-dominio.atlassian.net"
+export JIRA_ACME_EMAIL="tu@email.com"
+export JIRA_ACME_TOKEN="otro-token"
 ```
 
-La instancia se infiere automáticamente del prefijo del ticket (CULQI-123 → JIRA_CULQI_*).
+La instancia se infiere automáticamente del prefijo del ticket (PROJ-123 → JIRA_PROJ_*).
 
 ### Reglas de workflow (vault)
 
@@ -131,10 +180,10 @@ export AUTOPILOT_VERBOSITY=verbose
 cd /tu/proyecto
 
 # Ejecutar workflow completo para un ticket
-autopilot work CULQI-123
+autopilot work PROJ-123
 
 # Ejecutar en modo dry-run (sin cambios reales)
-autopilot work CULQI-123 --dry-run
+autopilot work PROJ-123 --dry-run
 
 # Ver la configuración cargada
 autopilot config
@@ -146,7 +195,7 @@ autopilot resume
 autopilot ledger
 
 # Ver ejecuciones de un ticket específico
-autopilot ledger --ticket CULQI-123
+autopilot ledger --ticket PROJ-123
 
 # Ver estado (stub)
 autopilot status
@@ -154,6 +203,20 @@ autopilot status
 # Review workflow (stub)
 autopilot review
 ```
+
+### Referencia de comandos y flags
+
+| Comando | Flags | Descripción |
+|---------|-------|-------------|
+| `autopilot work TICKET_ID` | `--dry-run` · `--skip-validation` · `--config-path` | Ejecuta el workflow completo (Context_Builder → Planner → Code_Executor → Tester → Publisher → Documentation_Agent) para `TICKET_ID`. Valida config y entorno antes de arrancar salvo `--skip-validation`. `--dry-run` no hace commits/push reales. |
+| `autopilot resume` | `--config-path` | Reanuda el último workflow pausado o fallido desde el último nodo completado con éxito (usa `.autopilot_state.json`). |
+| `autopilot config` | `--config-path` | Imprime en YAML la configuración efectiva (tras merge de defaults + archivo + env vars). Útil para depurar qué config se está usando realmente. |
+| `autopilot ledger` | `--ticket TICKET_ID` · `--limit N` · `--config-path` | Muestra el resumen del ledger de auditoría. Con `--ticket` filtra por ticket; `--limit` acota cuántas entradas se listan (las estadísticas totales siempre son sobre el ledger completo). |
+| `autopilot status` | — | Stub — todavía no implementado. |
+| `autopilot review` | — | Stub — todavía no implementado. |
+
+`--config-path` (default `auto`) acepta una ruta explícita a un `.autopilot.yaml`; si se omite, se
+autodescubre siguiendo el orden descrito en [Configuración](#configuración).
 
 ## Agentes
 
@@ -203,6 +266,10 @@ Cada ejecución produce un **RunRecord** que captura el ciclo completo:
 - **Contenido:** plan ejecutado, archivos modificados, tests (executed/passed/failed)
 - **Auditoría:** logs, errors, evidence, tokens_used, cost_usd
 
+**Nota:** `tokens_used`/`cost_usd` están en el schema para una futura integración,
+pero ningún agente/tool actual reporta uso de tokens u costo de vuelta al engine —
+en la práctica siempre quedan en `null`. No los uses como fuente real de costos todavía.
+
 Ubicación: `{workspace}/runs/{run_id}/run-record.json`
 
 ### Ledger
@@ -241,6 +308,26 @@ El Tester detecta el framework según los archivos del proyecto:
 - **Errores retryables** (timeout, red, tests fallidos): reintentos automáticos con backoff exponencial
 - **Errores no retryables** (autenticación, configuración, schema): pausa inmediata del workflow
 - El estado se persiste después de cada nodo exitoso para permitir resumir con `autopilot resume`
+
+## Solución de problemas
+
+Mensajes comunes al correr `autopilot work`/`resume`/`config`/`ledger` y cómo resolverlos:
+
+| Mensaje / síntoma | Causa | Solución |
+|---|---|---|
+| `workspace_location must not be empty` / `vault_location must not be empty` | El config no tiene esos campos completos (`config_sanity_validator`, corre antes que nada) | Completa `vault_location` en `~/.autopilot.yaml`. `workspace_location` se auto-detecta del CWD; no lo dejes vacío a mano si lo overrideaste. |
+| `workspace_location is not creatable: ...` | La ruta configurada no existe y ninguna carpeta ancestro es escribible | Usa una ruta bajo un directorio con permisos de escritura, o crea el directorio manualmente. |
+| `opencode not found in PATH` | El binario `opencode` no está instalado o no está en el `PATH` | Instala [OpenCode](https://github.com/opencode-ai/opencode) y verifica con `which opencode`. |
+| `Vault directory not found: ...` | `vault_location` apunta a una carpeta que no existe | Corrige la ruta en `~/.autopilot.yaml` (debe ser la raíz de tu vault de Obsidian). |
+| `Jira credentials incomplete for instance 'X'` (warning) | Faltan `JIRA_X_URL` / `JIRA_X_EMAIL` / `JIRA_X_TOKEN` para el prefijo del ticket (ej. `PROJ-123` → instancia `PROJ`) | Exporta las tres variables de entorno para esa instancia. Sin ellas, Context_Builder simplemente omite el fetch de Jira (no bloquea el run). |
+| El comando corre pero nunca crea/pushea una rama | Estás corriendo `--dry-run`, o `.autopilot-rules.md` no define reglas válidas | Quita `--dry-run` para un run real; revisa que `.autopilot-rules.md` exista en la raíz del vault con el formato esperado (ver [Reglas de workflow](#reglas-de-workflow-vault)). |
+| El ticket no cambia de status en Jira aunque configuré `jira_transition` | Publisher todavía no implementa la llamada real a la API de Jira para transitions | Comportamiento esperado por ahora — ver la nota en [Reglas de workflow](#reglas-de-workflow-vault) y el roadmap. Aplica la transición manualmente en Jira. |
+| `Not a git repository, skipping ledger commit` (log) | El `workspace_location` no es un repo git | No es un error bloqueante: el ledger sigue guardándose en `ledger.json`, solo se salta el commit a `autopilot-results`. Inicializa un repo git ahí si quieres ese historial versionado. |
+| `autopilot resume` falla con `State file not found: ...` | No existe `.autopilot_state.json` en el workspace (ningún run previo persistió estado) | Corre `autopilot work TICKET_ID` primero; `resume` solo aplica a workflows que fallaron o se pausaron a mitad de camino. |
+| Cambié `~/.autopilot.yaml` pero no veo el efecto | Existe un `.autopilot.yaml` en el directorio del proyecto (override local) que tiene prioridad | Revisa `autopilot config` para ver qué archivo se cargó realmente, o borra/ajusta el override local. |
+
+Si el mensaje no está en esta tabla, corre con `--config-path` explícito y sin `--skip-validation`
+para obtener el diagnóstico más detallado posible antes de reportarlo.
 
 ## Tests
 
@@ -318,4 +405,4 @@ autopilot/
 
 ## Licencia
 
-Proyecto privado.
+Proyecto privado. Ver [LICENSE](LICENSE).

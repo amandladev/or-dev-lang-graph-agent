@@ -14,7 +14,6 @@ from hypothesis import strategies as st
 from autopilot.infrastructure.persistence import file_lock
 from autopilot.infrastructure.persistence.file_lock import LedgerLock, lock_path_for
 
-
 path_string_strategy = st.text(min_size=1, max_size=50).filter(
     lambda s: "\x00" not in s
 )
@@ -36,6 +35,55 @@ class TestLockPathDeterminism:
     def test_distinct_paths_yield_distinct_lock_paths(self, p, q):
         if p != q:
             assert lock_path_for(p) != lock_path_for(q)
+
+
+class TestNonBlockingLock:
+    """`blocking=False` fails fast instead of waiting, so callers can detect
+    that another process already holds the lock (e.g. a per-workspace run
+    lock) without hanging.
+
+    **Validates: run-level concurrency guard**
+    """
+
+    def test_default_is_blocking(self):
+        tmpdir = tempfile.mkdtemp()
+        lock_path = Path(tmpdir) / "state.json.lock"
+
+        with LedgerLock(lock_path) as lock:
+            assert lock._blocking is True
+
+    def test_non_blocking_second_acquisition_raises_immediately(self):
+        if file_lock.fcntl is None:
+            pytest.skip("fcntl not available on this platform")
+
+        tmpdir = tempfile.mkdtemp()
+        lock_path = Path(tmpdir) / "run.lock"
+
+        with LedgerLock(lock_path, blocking=True):
+            with pytest.raises(OSError):
+                with LedgerLock(lock_path, blocking=False):
+                    pass
+
+    def test_non_blocking_lock_succeeds_when_free(self):
+        tmpdir = tempfile.mkdtemp()
+        lock_path = Path(tmpdir) / "run.lock"
+
+        with LedgerLock(lock_path, blocking=False):
+            pass
+
+    def test_non_blocking_lock_released_and_reacquirable(self):
+        if file_lock.fcntl is None:
+            pytest.skip("fcntl not available on this platform")
+
+        tmpdir = tempfile.mkdtemp()
+        lock_path = Path(tmpdir) / "run.lock"
+
+        with LedgerLock(lock_path, blocking=False):
+            pass
+
+        # Now free again — a second non-blocking acquisition must succeed.
+        with LedgerLock(lock_path, blocking=False):
+            pass
 
 
 class TestLockOSErrorPreventsAcquisition:

@@ -11,13 +11,11 @@ import os
 import tempfile
 from pathlib import Path
 
-import pytest
 import yaml
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from autopilot.infrastructure.adapters.yaml_config_loader import YAMLConfigLoader
-
 
 # ---------------------------------------------------------------------------
 # Strategies

@@ -7,6 +7,7 @@ a configured Application object ready for CLI consumption.
 import os
 from dataclasses import dataclass
 
+from autopilot.application.knowledge.experience_builder import ExperienceBuilder
 from autopilot.application.orchestrator.engine import OrchestrationEngine
 from autopilot.application.orchestrator.graph_builder import GraphBuilder
 from autopilot.application.orchestrator.retry_policy import RetryPolicy
@@ -26,6 +27,10 @@ from autopilot.infrastructure.agents.planner import PlannerAgent
 from autopilot.infrastructure.agents.publisher import PublisherAgent
 from autopilot.infrastructure.agents.reviewer import ReviewerAgent
 from autopilot.infrastructure.agents.tester import TesterAgent
+from autopilot.infrastructure.knowledge.json_knowledge_engine import JsonKnowledgeEngine
+from autopilot.infrastructure.persistence.ledger import Ledger
+from autopilot.infrastructure.persistence.ledger_committer import LedgerCommitter
+from autopilot.infrastructure.persistence.run_record_store import RunRecordStore
 from autopilot.infrastructure.tools.filesystem_tool import FilesystemTool
 from autopilot.infrastructure.tools.git_tool import GitTool
 from autopilot.infrastructure.tools.github_tool import GitHubTool
@@ -33,11 +38,6 @@ from autopilot.infrastructure.tools.jira_tool import JiraTool
 from autopilot.infrastructure.tools.obsidian_tool import ObsidianTool
 from autopilot.infrastructure.tools.opencode_tool import OpenCodeTool
 from autopilot.infrastructure.tools.playwright_tool import PlaywrightTool
-from autopilot.infrastructure.knowledge.json_knowledge_engine import JsonKnowledgeEngine
-from autopilot.application.knowledge.experience_builder import ExperienceBuilder
-from autopilot.infrastructure.persistence.run_record_store import RunRecordStore
-from autopilot.infrastructure.persistence.ledger import Ledger
-from autopilot.infrastructure.persistence.ledger_committer import LedgerCommitter
 
 
 @dataclass

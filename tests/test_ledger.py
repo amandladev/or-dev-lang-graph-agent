@@ -4,8 +4,6 @@ import json
 import os
 import tempfile
 
-import pytest
-
 from autopilot.domain.entities.ledger_entry import LedgerEntry
 from autopilot.domain.entities.run_record import RunRecord
 from autopilot.infrastructure.persistence.ledger import Ledger

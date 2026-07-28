@@ -8,14 +8,13 @@ attempting to register a second agent with the same name SHALL raise an error.
 Adding a new agent SHALL not alter the metadata of previously registered agents.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from autopilot.application.registries.agent_registry import AgentRegistry
-
 
 # ---------------------------------------------------------------------------
 # Fake agent implementing AgentInterface protocol for testing
@@ -29,8 +28,8 @@ class FakeAgent:
         self,
         name: str,
         description: str = "A fake agent for testing",
-        input_schema: Optional[dict[str, type]] = None,
-        output_schema: Optional[dict[str, type]] = None,
+        input_schema: dict[str, type] | None = None,
+        output_schema: dict[str, type] | None = None,
     ) -> None:
         self._name = name
         self._description = description
@@ -56,7 +55,7 @@ class FakeAgent:
     def execute(
         self,
         state: dict[str, Any],
-        memory_context: Optional[dict[str, Any]] = None,
+        memory_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {"output": "fake result"}
 

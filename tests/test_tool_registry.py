@@ -9,12 +9,11 @@ name SHALL raise an error that includes the unregistered tool name in the messag
 from typing import Any
 
 import pytest
-from hypothesis import given, settings, assume
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from autopilot.application.registries.tool_registry import ToolRegistry
 from autopilot.domain.interfaces.tool_interface import ToolInterface, ToolResult
-
 
 # ---------------------------------------------------------------------------
 # Fake tool implementation for testing

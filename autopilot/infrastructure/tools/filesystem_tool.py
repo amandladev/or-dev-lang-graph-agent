@@ -3,7 +3,7 @@
 import os
 from typing import Any
 
-from autopilot.domain.interfaces.tool_interface import ToolInterface, ToolResult
+from autopilot.domain.interfaces.tool_interface import ToolResult
 
 
 class FilesystemTool:
@@ -78,7 +78,7 @@ class FilesystemTool:
 
     def _read(self, path: str) -> ToolResult:
         """Read file content."""
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = f.read()
         return ToolResult(success=True, data=data)
 

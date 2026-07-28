@@ -40,7 +40,6 @@ class ExperienceBuilder:
         context = state.get("context", {})
         evidence = state.get("evidence", [])
         modified_files = state.get("modified_files", [])
-        metrics = state.get("metrics", {})
         errors = state.get("errors", [])
 
         # Extract fields

@@ -1,6 +1,6 @@
 """Agent interface protocol for the domain layer."""
 
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -30,7 +30,7 @@ class AgentInterface(Protocol):
     def execute(
         self,
         state: dict[str, Any],
-        memory_context: Optional[dict[str, Any]] = None,
+        memory_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         Execute the agent's task.

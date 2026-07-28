@@ -16,7 +16,6 @@ from hypothesis import strategies as st
 
 from autopilot.domain.entities.config import Config
 
-
 # ---------------------------------------------------------------------------
 # Strategies for valid values
 # ---------------------------------------------------------------------------

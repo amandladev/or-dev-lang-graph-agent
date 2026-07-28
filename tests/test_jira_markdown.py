@@ -1,6 +1,5 @@
 """Tests for JiraTool markdown_to_wiki conversion."""
 
-import pytest
 
 from autopilot.infrastructure.tools.jira_tool import markdown_to_wiki
 

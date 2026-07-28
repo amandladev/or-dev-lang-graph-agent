@@ -9,7 +9,6 @@ from hypothesis import strategies as st
 from autopilot.application.orchestrator.retry_policy import RetryPolicy
 from autopilot.domain.value_objects.error_record import ErrorType
 
-
 # ---------------------------------------------------------------------------
 # Property 13: Every listed retryable exception type classifies as retryable
 # Validates: Requirements 4.1

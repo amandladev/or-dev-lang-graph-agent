@@ -8,7 +8,6 @@ import yaml
 
 from autopilot.domain.entities.config import Config
 
-
 # Default config filename
 CONFIG_FILENAME = ".autopilot.yaml"
 
@@ -115,7 +114,7 @@ class YAMLConfigLoader:
 
         # Parse YAML
         try:
-            with open(config_path, "r") as f:
+            with open(config_path) as f:
                 data = yaml.safe_load(f) or {}
         except yaml.YAMLError as e:
             print(f"Failed to parse config file '{config_path}': {e}", file=sys.stderr)

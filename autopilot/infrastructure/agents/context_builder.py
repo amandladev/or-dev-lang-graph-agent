@@ -9,7 +9,7 @@ The agent coordinates JiraTool and ObsidianTool to build a unified
 context object that downstream agents (Planner, Code_Executor) can use.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from autopilot.application.registries.tool_registry import ToolRegistry
 
@@ -49,7 +49,7 @@ class ContextBuilderAgent:
     def execute(
         self,
         state: dict[str, Any],
-        memory_context: Optional[dict[str, Any]] = None,
+        memory_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Execute the context builder agent.
 

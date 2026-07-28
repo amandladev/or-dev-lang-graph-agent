@@ -9,11 +9,11 @@ Session management:
 - All agents in a workflow share the same OpenCode session
 """
 
-import subprocess
 import os
+import subprocess
 from typing import Any
 
-from autopilot.domain.interfaces.tool_interface import ToolInterface, ToolResult
+from autopilot.domain.interfaces.tool_interface import ToolResult
 
 
 class OpenCodeTool:

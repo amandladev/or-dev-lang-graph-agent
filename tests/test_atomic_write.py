@@ -13,8 +13,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from autopilot.infrastructure.persistence.atomic_write import atomic_write_json
-
+from autopilot.infrastructure.persistence.atomic_write import atomic_write_json, atomic_write_text
 
 json_value_strategy = st.recursive(
     st.none() | st.booleans() | st.integers(min_value=-1000, max_value=1000)
@@ -115,3 +114,31 @@ class TestAtomicWriteReplaceFailure:
             f for f in os.listdir(tmpdir) if f.endswith(".tmp")
         ]
         assert len(remaining_tmp_files) == 1
+
+
+class TestAtomicWriteTextRoundTrip:
+    """atomic_write_text mirrors atomic_write_json's guarantees for callers
+    that already hold a serialized string (e.g. a custom JSON encoder)."""
+
+    def test_round_trip(self):
+        tmpdir = tempfile.mkdtemp()
+        path = Path(tmpdir) / "state.json"
+        atomic_write_text(path, '{"a": 1}')
+
+        assert path.read_text(encoding="utf-8") == '{"a": 1}'
+
+    def test_write_failure_leaves_destination_untouched_and_no_tmp_left(self):
+        tmpdir = tempfile.mkdtemp()
+        path = Path(tmpdir) / "dest.json"
+        path.write_bytes(b"pre-existing")
+
+        with patch(
+            "autopilot.infrastructure.persistence.atomic_write.os.fdopen",
+            side_effect=OSError("disk full"),
+        ):
+            with pytest.raises(OSError):
+                atomic_write_text(path, "new content")
+
+        assert path.read_bytes() == b"pre-existing"
+        remaining_tmp_files = [f for f in os.listdir(tmpdir) if f.endswith(".tmp")]
+        assert remaining_tmp_files == []
