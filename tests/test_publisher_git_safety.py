@@ -6,12 +6,10 @@ Validates: Requirements 1.1, 1.2, 1.3, 1.4, 2.1-2.7, 3.1-3.4, 4.1-4.3,
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from autopilot.infrastructure.agents.publisher import PublisherAgent
-
 
 # ---------------------------------------------------------------------------
 # Strategies

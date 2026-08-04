@@ -86,7 +86,7 @@ class TestWriteOperation:
 
         assert result.success is True
         assert result.data == "written"
-        with open(filepath, "r") as f:
+        with open(filepath) as f:
             assert f.read() == "new content"
 
     def test_write_overwrites_existing(self, tool, tmp_dir):
@@ -97,7 +97,7 @@ class TestWriteOperation:
         result = tool.execute(operation="write", path=filepath, content="new content")
 
         assert result.success is True
-        with open(filepath, "r") as f:
+        with open(filepath) as f:
             assert f.read() == "new content"
 
     def test_write_creates_parent_directories(self, tool, tmp_dir):
@@ -107,7 +107,7 @@ class TestWriteOperation:
 
         assert result.success is True
         assert os.path.exists(filepath)
-        with open(filepath, "r") as f:
+        with open(filepath) as f:
             assert f.read() == "nested"
 
     def test_write_empty_content(self, tool, tmp_dir):
@@ -116,7 +116,7 @@ class TestWriteOperation:
         result = tool.execute(operation="write", path=filepath, content="")
 
         assert result.success is True
-        with open(filepath, "r") as f:
+        with open(filepath) as f:
             assert f.read() == ""
 
 

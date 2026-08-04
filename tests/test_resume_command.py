@@ -7,8 +7,8 @@ paused or failed workflow from its last successful step by deserializing
 the persisted Workflow_State.
 """
 
-from unittest.mock import MagicMock, patch
 import uuid
+from unittest.mock import MagicMock
 
 from autopilot.application.use_cases.resume_command import ResumeCommand
 from autopilot.domain.entities.config import Config

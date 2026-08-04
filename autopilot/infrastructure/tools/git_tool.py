@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from autopilot.domain.interfaces.tool_interface import ToolInterface, ToolResult
+from autopilot.domain.interfaces.tool_interface import ToolResult
 
 
 class GitTool:

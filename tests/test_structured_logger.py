@@ -11,7 +11,6 @@ import pytest
 
 from autopilot.infrastructure.adapters.structured_logger import StructuredLogger
 
-
 # ---------------------------------------------------------------------------
 # Construction Tests
 # ---------------------------------------------------------------------------

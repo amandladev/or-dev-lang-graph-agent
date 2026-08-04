@@ -6,22 +6,23 @@ and file I/O operations.
 Validates: Requirements 13.1, 13.2, 13.3, 13.5, 13.6
 """
 
-import tempfile
 import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
+from autopilot.domain.entities.workflow_state import WorkflowState
+from autopilot.domain.interfaces.serializer import SerializerInterface
+from autopilot.domain.value_objects.error_record import ErrorRecord, ErrorType
+from autopilot.domain.value_objects.evidence import EvidenceItem
+from autopilot.domain.value_objects.log_entry import LogEntry, StepStatus
 from autopilot.infrastructure.adapters.json_serializer import (
     DeserializationError,
     JSONSerializer,
 )
-from autopilot.domain.entities.workflow_state import WorkflowState
-from autopilot.domain.value_objects.log_entry import LogEntry, StepStatus
-from autopilot.domain.value_objects.evidence import EvidenceItem
-from autopilot.domain.value_objects.error_record import ErrorRecord, ErrorType
-from autopilot.domain.interfaces.serializer import SerializerInterface
 
 
 class TestJSONSerializerProtocol:
@@ -256,3 +257,35 @@ class TestFileIO:
             serializer.persist(state, filepath)
             loaded = serializer.load(filepath)
             assert loaded == state
+
+    def test_persist_writes_atomically_no_partial_content_on_replace_failure(self):
+        """A failure during the final os.replace() must never leave a
+        half-written state file (the pre-existing content is preserved)."""
+        state = WorkflowState(ticket={"id": "ATOMIC-TEST"})
+        serializer = JSONSerializer()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            filepath = Path(tmpdir) / "state.json"
+            filepath.write_text("pre-existing", encoding="utf-8")
+
+            with patch(
+                "autopilot.infrastructure.persistence.atomic_write.os.replace",
+                side_effect=OSError("simulated replace failure"),
+            ):
+                with pytest.raises(OSError):
+                    serializer.persist(state, filepath)
+
+            assert filepath.read_text(encoding="utf-8") == "pre-existing"
+
+    def test_persist_releases_lock_for_subsequent_calls(self):
+        """persist() must not leave the file locked after returning, so a
+        second persist() (e.g. the next graph node) can proceed."""
+        serializer = JSONSerializer()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            filepath = Path(tmpdir) / "state.json"
+            serializer.persist(WorkflowState(ticket={"id": "A"}), filepath)
+            serializer.persist(WorkflowState(ticket={"id": "B"}), filepath)
+
+            loaded = serializer.load(filepath)
+            assert loaded.ticket == {"id": "B"}

@@ -3,10 +3,9 @@
 import uuid
 
 from autopilot.application.orchestrator.engine import OrchestrationEngine
-from autopilot.application.orchestrator.graph_builder import GraphBuilder, WORK_GRAPH_NODES
+from autopilot.application.orchestrator.graph_builder import WORK_GRAPH_NODES, GraphBuilder
 from autopilot.domain.entities.config import Config
 from autopilot.domain.interfaces.serializer import SerializerInterface
-
 
 # Mapping from agent registry names to graph node names.
 _AGENT_TO_NODE: dict[str, str] = {

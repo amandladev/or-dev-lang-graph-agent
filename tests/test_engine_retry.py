@@ -16,7 +16,6 @@ from autopilot.application.orchestrator.retry_policy import RetryPolicy
 from autopilot.domain.entities.run_record import RunRecord
 from autopilot.domain.value_objects.exceptions import ToolTimeoutError
 
-
 # ---------------------------------------------------------------------------
 # Shared fakes (file-local, matching tests/test_state_merge.py convention)
 # ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@ auditing and replaying executions.
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 @dataclass
@@ -33,8 +33,12 @@ class RunRecord:
         logs: List of log entries from execution.
         errors: List of errors encountered.
         evidence: List of evidence items collected.
-        tokens_used: Token usage metrics (None if not tracked).
-        cost_usd: Cost in USD (None if not tracked).
+        tokens_used: Token usage metrics (None if not tracked). NOTE: no
+            current agent or tool reports this back to the engine, so this
+            field is always None in practice — it exists for a future
+            integration with a token-reporting OpenCode/LLM call.
+        cost_usd: Cost in USD (None if not tracked). Same caveat as
+            tokens_used: never populated by the current codebase.
         metadata: Additional metadata for extensibility.
     """
 
@@ -42,7 +46,7 @@ class RunRecord:
     ticket_id: str = ""
     ticket_title: str = ""
     started_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     )
     finished_at: str | None = None
     duration_seconds: int | None = None
@@ -69,7 +73,7 @@ class RunRecord:
         """
         self.status = "completed"
         self.verdict = verdict
-        self.finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.finished_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         if self.started_at:
             started = datetime.fromisoformat(self.started_at.replace("Z", "+00:00"))
             finished = datetime.fromisoformat(self.finished_at.replace("Z", "+00:00"))
@@ -82,7 +86,7 @@ class RunRecord:
             error: Description of the failure.
         """
         self.status = "failed"
-        self.finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.finished_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         self.errors.append({
             "type": "run_failure",
             "description": error,
@@ -96,7 +100,7 @@ class RunRecord:
     def mark_cancelled(self) -> None:
         """Mark the run as cancelled."""
         self.status = "cancelled"
-        self.finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.finished_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         if self.started_at:
             started = datetime.fromisoformat(self.started_at.replace("Z", "+00:00"))
             finished = datetime.fromisoformat(self.finished_at.replace("Z", "+00:00"))

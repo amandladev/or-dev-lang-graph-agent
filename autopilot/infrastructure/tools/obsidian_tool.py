@@ -5,12 +5,10 @@ relevant to a given query. Uses simple keyword matching for the MVP,
 with plans to integrate semantic search later.
 """
 
-import os
-import re
 from pathlib import Path
 from typing import Any
 
-from autopilot.domain.interfaces.tool_interface import ToolInterface, ToolResult
+from autopilot.domain.interfaces.tool_interface import ToolResult
 
 
 class ObsidianTool:

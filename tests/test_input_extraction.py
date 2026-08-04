@@ -8,16 +8,14 @@ extracts and passes only the fields declared in the agent's input_schema —
 no extra fields.
 """
 
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
-from hypothesis import given, settings, assume
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from autopilot.application.orchestrator.engine import OrchestrationEngine, GraphState
+from autopilot.application.orchestrator.engine import GraphState, OrchestrationEngine
 from autopilot.application.orchestrator.retry_policy import RetryPolicy
-
 
 # ---------------------------------------------------------------------------
 # All possible fields in GraphState
@@ -59,7 +57,7 @@ class RecordingAgent:
     def execute(
         self,
         state: dict[str, Any],
-        memory_context: Optional[dict[str, Any]] = None,
+        memory_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self.received_state = dict(state)
         return {"metrics": {"completed": True}}

@@ -17,16 +17,16 @@ Actions:
     - status_entered_at: Get timestamp of last transition into a status
 """
 
-import os
-import re
-import urllib.request
-import urllib.error
-import urllib.parse
 import base64
 import json
+import os
+import re
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import Any
 
-from autopilot.domain.interfaces.tool_interface import ToolInterface, ToolResult
+from autopilot.domain.interfaces.tool_interface import ToolResult
 
 
 def markdown_to_wiki(md: str) -> str:
@@ -41,7 +41,7 @@ def markdown_to_wiki(md: str) -> str:
         fence = re.match(r"^\s*```(\w+)?\s*$", line)
         if fence:
             lang = fence.group(1)
-            out.append("{code:%s}" % lang if lang and not in_code else "{code}")
+            out.append(f"{{code:{lang}}}" if lang and not in_code else "{code}")
             in_code = not in_code
             continue
         if in_code:

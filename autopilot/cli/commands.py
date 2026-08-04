@@ -63,10 +63,14 @@ def work(ticket_id: str, config_path: str, skip_validation: bool, dry_run: bool)
 
     _print_banner()
 
+    run_lock = None
     try:
-        from autopilot.infrastructure.bootstrap import create_application
-        from autopilot.infrastructure.validators import config_sanity_validator, validate_environment
         from autopilot.domain.entities.ledger_entry import LedgerEntry
+        from autopilot.infrastructure.bootstrap import create_application
+        from autopilot.infrastructure.validators import (
+            config_sanity_validator,
+            validate_environment,
+        )
 
         click.secho(f"  Ticket: {ticket_id}", fg="white")
         click.secho(f"  Config: {config_path}", fg="white", dim=True)
@@ -92,6 +96,22 @@ def work(ticket_id: str, config_path: str, skip_validation: bool, dry_run: bool)
                 click.secho("  ✓ Environment OK", fg="green")
                 click.echo()
 
+        # Acquire a per-workspace run lock so two `work`/`resume` executions
+        # never race on the same workspace's state file and git branch.
+        import os
+
+        from autopilot.infrastructure.persistence.file_lock import LedgerLock, lock_path_for
+
+        run_lock_path = lock_path_for(os.path.join(app.config.workspace_location, ".autopilot_run"))
+        run_lock = LedgerLock(run_lock_path, blocking=False)
+        try:
+            run_lock.__enter__()
+        except OSError:
+            click.secho("✗ Ya hay un run de Autopilot activo en este workspace.", fg="red")
+            click.secho("  Espera a que termine. Si el lock quedó huérfano tras un crash, bórralo:", fg="red", dim=True)
+            click.secho(f"  rm {run_lock_path}", fg="red", dim=True)
+            sys.exit(1)
+
         # Execute workflow
         click.secho("Starting workflow...", fg="cyan")
         click.echo()
@@ -102,8 +122,9 @@ def work(ticket_id: str, config_path: str, skip_validation: bool, dry_run: bool)
 
         # Store experience from completed workflow
         try:
-            from autopilot.infrastructure.adapters.json_serializer import JSONSerializer
             import os
+
+            from autopilot.infrastructure.adapters.json_serializer import JSONSerializer
 
             state_path = os.path.join(app.config.workspace_location, ".autopilot_state.json")
             if os.path.exists(state_path):
@@ -141,6 +162,7 @@ def work(ticket_id: str, config_path: str, skip_validation: bool, dry_run: bool)
 
         # Load persisted state for detailed report
         import os
+
         from autopilot.infrastructure.adapters.json_serializer import JSONSerializer
 
         state = None
@@ -170,7 +192,7 @@ def work(ticket_id: str, config_path: str, skip_validation: bool, dry_run: bool)
             click.secho(f"  Status:    {run_record.status.upper()}", fg=verdict_color, bold=True)
             click.secho(f"  Verdict:   {run_record.verdict}", fg=verdict_color, bold=True)
         elif run_record.status == "failed":
-            click.secho(f"  Status:    FAILED", fg="red", bold=True)
+            click.secho("  Status:    FAILED", fg="red", bold=True)
         else:
             click.secho(f"  Status:    {run_record.status.upper()}", fg="yellow", bold=True)
 
@@ -243,6 +265,9 @@ def work(ticket_id: str, config_path: str, skip_validation: bool, dry_run: bool)
         click.echo()
         click.secho(f"✗ Workflow failed: {exc}", fg="red", err=True)
         sys.exit(1)
+    finally:
+        if run_lock is not None:
+            run_lock.__exit__(None, None, None)
 
 
 @cli.command()
@@ -262,6 +287,7 @@ def resume(config_path: str) -> None:
     """Resume a previously paused or failed workflow from its last successful step."""
     _print_banner()
 
+    run_lock = None
     try:
         from autopilot.infrastructure.bootstrap import create_application
         from autopilot.infrastructure.validators import config_sanity_validator
@@ -270,6 +296,22 @@ def resume(config_path: str) -> None:
 
         sanity = config_sanity_validator(app.config)
         if _print_validation(sanity):
+            sys.exit(1)
+
+        # Acquire the same per-workspace run lock used by `work`, so a
+        # resume never races with another active run on this workspace.
+        import os
+
+        from autopilot.infrastructure.persistence.file_lock import LedgerLock, lock_path_for
+
+        run_lock_path = lock_path_for(os.path.join(app.config.workspace_location, ".autopilot_run"))
+        run_lock = LedgerLock(run_lock_path, blocking=False)
+        try:
+            run_lock.__enter__()
+        except OSError:
+            click.secho("✗ Ya hay un run de Autopilot activo en este workspace.", fg="red")
+            click.secho("  Espera a que termine. Si el lock quedó huérfano tras un crash, bórralo:", fg="red", dim=True)
+            click.secho(f"  rm {run_lock_path}", fg="red", dim=True)
             sys.exit(1)
 
         click.secho("Resuming workflow from last checkpoint...", fg="cyan")
@@ -288,6 +330,9 @@ def resume(config_path: str) -> None:
     except Exception as exc:
         click.secho(f"✗ Resume failed: {exc}", fg="red", err=True)
         sys.exit(1)
+    finally:
+        if run_lock is not None:
+            run_lock.__exit__(None, None, None)
 
 
 @cli.command()

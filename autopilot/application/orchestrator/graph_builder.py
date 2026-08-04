@@ -1,9 +1,8 @@
 """Graph builder for constructing LangGraph workflow graphs."""
 
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import END, START, StateGraph
 
 from autopilot.application.orchestrator.engine import GraphState
-
 
 # Ordered list of nodes in the work workflow graph.
 WORK_GRAPH_NODES = [

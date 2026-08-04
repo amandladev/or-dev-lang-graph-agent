@@ -5,8 +5,8 @@ version control and audit trail. Uses a single-writer pattern to prevent
 concurrent commit conflicts.
 """
 
-import subprocess
 import logging
+import subprocess
 from pathlib import Path
 
 log = logging.getLogger(__name__)

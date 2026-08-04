@@ -5,7 +5,7 @@ Produces a structured summary that can be stored in Obsidian or
 added as a Jira comment.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from autopilot.application.registries.tool_registry import ToolRegistry
 
@@ -49,7 +49,7 @@ class DocumentationAgent:
     def execute(
         self,
         state: dict[str, Any],
-        memory_context: Optional[dict[str, Any]] = None,
+        memory_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Generate a documentation summary of the work performed.
 

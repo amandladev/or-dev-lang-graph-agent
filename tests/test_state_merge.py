@@ -13,9 +13,8 @@ from typing import Any
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from autopilot.application.orchestrator.engine import append_list, overwrite, OrchestrationEngine
+from autopilot.application.orchestrator.engine import OrchestrationEngine, append_list, overwrite
 from autopilot.application.orchestrator.retry_policy import RetryPolicy
-
 
 # ---------------------------------------------------------------------------
 # Strategies

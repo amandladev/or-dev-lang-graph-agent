@@ -7,19 +7,16 @@ Tests:
 - JsonKnowledgeEngine (store, find_similar, find_by_ticket, find_by_tags, search)
 """
 
-import tempfile
 import json
 from datetime import datetime
-from pathlib import Path
 
 import pytest
 
-from autopilot.domain.entities.experience import Experience
-from autopilot.domain.value_objects.search_criteria import SearchCriteria
-from autopilot.domain.interfaces.knowledge_engine import KnowledgeEngineInterface
 from autopilot.application.knowledge.experience_builder import ExperienceBuilder
+from autopilot.domain.entities.experience import Experience
+from autopilot.domain.interfaces.knowledge_engine import KnowledgeEngineInterface
+from autopilot.domain.value_objects.search_criteria import SearchCriteria
 from autopilot.infrastructure.knowledge.json_knowledge_engine import JsonKnowledgeEngine
-
 
 # ---------------------------------------------------------------------------
 # Experience entity tests

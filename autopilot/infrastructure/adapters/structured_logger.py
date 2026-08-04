@@ -199,7 +199,7 @@ class StructuredLogger:
             with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(log_entries, f, indent=2, default=str)
             return None
-        except (IOError, OSError) as exc:
+        except OSError as exc:
             error_info = {
                 "error_type": "filesystem_write_failure",
                 "description": f"Failed to write execution log to {filepath}: {exc}",

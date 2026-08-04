@@ -10,9 +10,15 @@ Tests the CLI interface end-to-end using Click's CliRunner to verify:
 - Work command behavior with and without ticket-id
 """
 
+import os
+from unittest.mock import MagicMock, patch
+
+import pytest
 from click.testing import CliRunner
 
 from autopilot.cli.commands import cli
+from autopilot.domain.entities.config import Config
+from autopilot.infrastructure.persistence.file_lock import LedgerLock, lock_path_for
 
 
 def test_cli_no_command_shows_help_with_nonzero_exit():
@@ -129,11 +135,6 @@ def test_cli_help_shows_all_commands():
 # Feature: safe-persistence-and-config-validation
 # Validates: Requirements 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7
 # ---------------------------------------------------------------------------
-
-import pytest
-from unittest.mock import MagicMock, patch
-
-from autopilot.domain.entities.config import Config
 
 
 def _make_valid_config(tmp_path):
@@ -325,3 +326,69 @@ def test_cli_work_skip_validation_with_valid_config_skips_validate_environment_o
 
     mock_sanity.assert_called_once()
     mock_validate_env.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Per-workspace run lock tests (`work` / `resume` must not race on the same
+# workspace's state file / git branch)
+# ---------------------------------------------------------------------------
+
+
+def test_cli_work_aborts_when_workspace_run_lock_already_held(tmp_path):
+    """If another process already holds the per-workspace run lock, `work`
+    exits non-zero with a clear message and never calls work_command.execute."""
+    config = _make_valid_config(tmp_path)
+    app = _make_mock_app(config)
+
+    run_lock_path = lock_path_for(os.path.join(config.workspace_location, ".autopilot_run"))
+
+    with LedgerLock(run_lock_path):
+        with patch("autopilot.infrastructure.bootstrap.create_application", return_value=app), \
+             patch("autopilot.infrastructure.validators.validate_environment"):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["work", "TICKET-1", "--skip-validation"])
+
+    assert result.exit_code != 0
+    assert "ya hay un run" in result.output.lower()
+    app.work_command.execute.assert_not_called()
+
+
+def test_cli_resume_aborts_when_workspace_run_lock_already_held(tmp_path):
+    """If another process already holds the per-workspace run lock, `resume`
+    exits non-zero and never calls resume_command.execute."""
+    config = _make_valid_config(tmp_path)
+    app = _make_mock_app(config)
+
+    run_lock_path = lock_path_for(os.path.join(config.workspace_location, ".autopilot_run"))
+
+    with LedgerLock(run_lock_path):
+        with patch("autopilot.infrastructure.bootstrap.create_application", return_value=app):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["resume"])
+
+    assert result.exit_code != 0
+    assert "ya hay un run" in result.output.lower()
+    app.resume_command.execute.assert_not_called()
+
+
+def test_cli_work_releases_run_lock_after_success(tmp_path):
+    """After a successful `work` run, the run lock is released so a
+    subsequent invocation can acquire it."""
+    config = _make_valid_config(tmp_path)
+    app = _make_mock_app(config)
+    app.work_command.execute.return_value = MagicMock(
+        run_id="abc123def456", mode="dry-run", status="completed", verdict="PASS",
+        tests_executed=0, tests_passed=0, tests_failed=0, modified_files=[], errors=[],
+    )
+
+    with patch("autopilot.infrastructure.bootstrap.create_application", return_value=app), \
+         patch("autopilot.infrastructure.validators.validate_environment"):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["work", "TICKET-1", "--skip-validation", "--dry-run"])
+
+    assert result.exit_code == 0
+
+    run_lock_path = lock_path_for(os.path.join(config.workspace_location, ".autopilot_run"))
+    # A fresh non-blocking acquisition must succeed — proves the lock was released.
+    with LedgerLock(run_lock_path, blocking=False):
+        pass

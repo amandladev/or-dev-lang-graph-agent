@@ -11,12 +11,10 @@ with fallback to searching notes for relevant workflow information.
 
 import re
 import subprocess
-import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from autopilot.application.registries.tool_registry import ToolRegistry
-
 
 # Default rules file name in the vault
 RULES_FILENAME = ".autopilot-rules.md"
@@ -65,7 +63,7 @@ class PublisherAgent:
     def execute(
         self,
         state: dict[str, Any],
-        memory_context: Optional[dict[str, Any]] = None,
+        memory_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Execute the publishing workflow.
 
@@ -161,8 +159,6 @@ class PublisherAgent:
         """
         rules = self._default_rules()
         rules["source"] = "vault"
-
-        content_lower = content.lower()
 
         for line in content.split("\n"):
             stripped = line.strip().lstrip("- ")

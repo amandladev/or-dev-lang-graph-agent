@@ -6,7 +6,11 @@ The ledger is committed to a dedicated git branch for version control.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from autopilot.domain.entities.run_record import RunRecord
 
 
 @dataclass
@@ -33,7 +37,7 @@ class LedgerEntry:
     ticket_id: str = ""
     ticket_title: str = ""
     timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     )
     status: str = "completed"
     verdict: str | None = None
