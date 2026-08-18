@@ -70,16 +70,15 @@ def test_commitledger_success_restores_original_branch(git_repo):
 
 
 def test_commitledger_error_during_commit_restores_current_not_previous(git_repo, monkeypatch):
-    """Force a failure inside the try block (after `current` has been
-    captured and after checking out BRANCH_NAME) and verify the repo is
-    restored to `current` ('trunk'), not to git's toggle target
-    ('sidetrack')."""
+    """Force a failure while advancing the autopilot-results ref and verify
+    the repo stays on the current branch ('trunk'), not on the results
+    branch."""
     committer = LedgerCommitter(workspace=git_repo)
     original_run_git = committer._run_git
 
     def failing_run_git(*args, check=True):
-        if args and args[0] == "commit":
-            raise subprocess.CalledProcessError(returncode=1, cmd=["git", "commit"], stderr="boom")
+        if args and args[0] == "update-ref":
+            raise subprocess.CalledProcessError(returncode=1, cmd=["git", "update-ref"], stderr="boom")
         return original_run_git(*args, check=check)
 
     monkeypatch.setattr(committer, "_run_git", failing_run_git)

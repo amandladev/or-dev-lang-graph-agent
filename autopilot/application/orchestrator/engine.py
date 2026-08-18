@@ -234,8 +234,11 @@ class OrchestrationEngine:
                 test_results = [e for e in result.get("evidence", [])
                                if e.get("type") == "test_result"]
                 tests_executed = len(test_results)
-                tests_passed = sum(1 for t in test_results
-                                  if t.get("result", "").upper().startswith("PASS"))
+                tests_passed = sum(
+                    1 for t in test_results
+                    if t.get("result", "").upper().startswith("PASS")
+                    or t.get("data", {}).get("status", "").lower() == "passed"
+                )
 
                 run_record.update_test_counts(
                     executed=tests_executed,
@@ -414,7 +417,11 @@ class OrchestrationEngine:
         elif agent_name == "tester":
             evidence = output.get("evidence", [])
             tests = [e for e in evidence if e.get("type") == "test_result"]
-            passed = sum(1 for t in tests if "pass" in str(t.get("data", {}).get("result", "")).lower())
+            passed = sum(
+                1 for t in tests
+                if "pass" in str(t.get("result", "")).lower()
+                or t.get("data", {}).get("status", "").lower() == "passed"
+            )
             return f"{passed}/{len(tests)} tests passed" if tests else "No tests found"
         elif agent_name == "publisher":
             files = output.get("modified_files", [])

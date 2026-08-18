@@ -229,7 +229,7 @@ def work(ticket_id: str, config_path: str, skip_validation: bool, dry_run: bool)
                 ev_type = ev.get("type", "unknown")
                 ev_desc = ev.get("description", "")
                 if ev_type == "test_result":
-                    result = ev.get("data", {}).get("result", "")
+                    result = ev.get("data", {}).get("status", "") or ev.get("data", {}).get("result", "")
                     icon = "✓" if "pass" in str(result).lower() else "✗"
                     color = "green" if "pass" in str(result).lower() else "red"
                     click.secho(f"    {icon} {ev_desc[:80]}", fg=color)

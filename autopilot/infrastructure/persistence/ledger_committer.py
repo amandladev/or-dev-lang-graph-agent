@@ -6,6 +6,7 @@ concurrent commit conflicts.
 """
 
 import logging
+import os
 import subprocess
 from pathlib import Path
 
@@ -56,24 +57,30 @@ class LedgerCommitter:
         result = self._run_git("branch", "--list", branch, check=False)
         return bool(result.stdout.strip())
 
-    def _ensure_branch(self) -> None:
-        """Ensure the autopilot-results branch exists, creating it if needed."""
-        if not self._branch_exists(self.BRANCH_NAME):
-            # Create orphan branch from current state
-            result = self._run_git("checkout", "-b", self.BRANCH_NAME, check=False)
-            if result.returncode != 0:
-                # Branch might already exist from another process
-                result = self._run_git("checkout", self.BRANCH_NAME, check=False)
-                if result.returncode != 0:
-                    log.warning("Could not create/checkout branch %s: %s",
-                                self.BRANCH_NAME, result.stderr)
-                    return
-            # Commit current state as initial
-            self._run_git("add", "-A", check=False)
-            self._run_git("commit", "--allow-empty", "-m",
-                          "Initial autopilot-results branch", check=False)
-            # Return to previous branch
-            self._run_git("checkout", "-", check=False)
+    def _ensure_branch(self) -> bool:
+        """Ensure the autopilot-results branch exists, creating it if needed.
+
+        Creates the branch with a commit-tree ref update (no checkout), so
+        the caller's working tree and current branch are never touched.
+
+        Returns:
+            True if the branch exists afterwards, False on failure.
+        """
+        if self._branch_exists(self.BRANCH_NAME):
+            return True
+        empty_tree = self._run_git("hash-object", "-t", "tree", "/dev/null").stdout.strip()
+        result = self._run_git(
+            "commit-tree", empty_tree, "-m", "Initial autopilot-results branch",
+            check=False,
+        )
+        if result.returncode != 0:
+            log.warning("Could not create branch %s: %s", self.BRANCH_NAME, result.stderr)
+            return False
+        self._run_git(
+            "update-ref", f"refs/heads/{self.BRANCH_NAME}", result.stdout.strip(),
+            check=False,
+        )
+        return True
 
     def _is_git_repo(self) -> bool:
         """Check if the workspace is a git repository."""
@@ -88,8 +95,10 @@ class LedgerCommitter:
     ) -> bool:
         """Commit ledger and optional files to the autopilot-results branch.
 
-        Uses a single-writer pattern: checks out the branch, stages files,
-        commits, and returns to the previous branch.
+        Uses a single-writer pattern: stages the ledger, creates the commit
+        with commit-tree, and advances the branch ref with update-ref. Never
+        checks out the results branch, so the working tree and the caller's
+        current branch are left untouched (the ledger file stays on disk).
 
         Args:
             ledger_path: Path to the ledger.json file.
@@ -104,56 +113,55 @@ class LedgerCommitter:
             log.info("Not a git repository, skipping ledger commit")
             return False
 
-        current: str | None = None
-
         try:
-            # Save current branch
-            current = self._run_git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-
             # Ensure target branch exists
-            self._ensure_branch()
-
-            # Checkout the results branch
-            result = self._run_git("checkout", self.BRANCH_NAME, check=False)
-            if result.returncode != 0:
-                log.error("Failed to checkout %s: %s", self.BRANCH_NAME, result.stderr)
+            if not self._ensure_branch():
                 return False
 
             # Stage the ledger
-            self._run_git("add", str(ledger_path))
+            if Path(ledger_path).exists():
+                self._run_git("add", str(ledger_path))
 
             # Stage additional files if provided
             if files:
                 for f in files:
                     self._run_git("add", f)
 
-            # Check if there are changes to commit
-            status = self._run_git("status", "--porcelain")
-            if not status.stdout.strip():
-                log.info("No changes to commit")
-                self._run_git("checkout", current, check=False)
-                return True
+            # No changes to commit if the ledger already matches the branch
+            if Path(ledger_path).exists() and not files:
+                rel = os.path.relpath(Path(ledger_path), self._workspace)
+                branch_ledger = self._run_git(
+                    "show", f"{self.BRANCH_NAME}:{rel}", check=False
+                )
+                if (
+                    branch_ledger.returncode == 0
+                    and branch_ledger.stdout == Path(ledger_path).read_text(encoding="utf-8")
+                ):
+                    log.info("No changes to commit")
+                    return True
 
-            # Commit
-            self._run_git("commit", "-m", message)
+            # Create the commit and advance the branch ref
+            tree = self._run_git("write-tree").stdout.strip()
+            parent = self._run_git("rev-parse", self.BRANCH_NAME).stdout.strip()
+            result = self._run_git(
+                "commit-tree", tree, "-p", parent, "-m", message, check=False
+            )
+            if result.returncode != 0:
+                log.error("Failed to create commit: %s", result.stderr)
+                return False
+            self._run_git(
+                "update-ref", f"refs/heads/{self.BRANCH_NAME}", result.stdout.strip(),
+                check=False,
+            )
 
-            # Return to original branch
-            self._run_git("checkout", current)
+            # Unstage what we staged, keeping the working tree intact
+            self._run_git("reset", "-q", check=False)
 
             log.info("Committed to %s: %s", self.BRANCH_NAME, message)
             return True
 
         except subprocess.CalledProcessError as e:
             log.error("Git error: %s", e.stderr)
-            # Try to return to the branch we were actually on before this
-            # call started. Falling back to "checkout -" here would toggle
-            # to whatever branch git considers "previous", which is not
-            # necessarily `current` and can strand the repo on
-            # BRANCH_NAME after a failure.
-            try:
-                self._run_git("checkout", current if current else "-", check=False)
-            except Exception:
-                pass
             return False
 
     def get_last_commits(self, count: int = 10) -> list[dict]:
