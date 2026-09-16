@@ -45,31 +45,26 @@ def validate_environment(config, ticket_id: str = "") -> ValidationResult:
     """
     result = ValidationResult()
 
-    # Check opencode is available
     if not shutil.which("opencode"):
         result.add_error(
             "opencode not found in PATH. Install it: https://github.com/opencode-ai/opencode"
         )
 
-    # Check git is available
     if not shutil.which("git"):
         result.add_error("git not found in PATH")
 
-    # Check vault directory exists
     vault = Path(config.vault_location)
     if not vault.exists():
         result.add_error(f"Vault directory not found: {config.vault_location}")
     elif not vault.is_dir():
         result.add_error(f"Vault path is not a directory: {config.vault_location}")
 
-    # Check workspace directory exists
     workspace = Path(config.workspace_location)
     if not workspace.exists():
         result.add_warning(
             f"Workspace directory not found: {config.workspace_location} (will be created)"
         )
 
-    # Check Jira credentials for the ticket's instance
     if ticket_id and "-" in ticket_id:
         instance = ticket_id.split("-")[0].upper()
         jira_url = os.environ.get(f"JIRA_{instance}_URL", "")

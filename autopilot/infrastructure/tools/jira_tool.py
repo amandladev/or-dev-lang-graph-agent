@@ -198,7 +198,6 @@ class JiraTool:
         """
         instance_name = instance or self._default_instance
 
-        # Load credentials from environment
         creds = self._load_credentials(instance_name)
         if creds is None:
             return ToolResult(
@@ -210,11 +209,9 @@ class JiraTool:
 
         base_url, email, token = creds
 
-        # Build the API request
         url = f"{base_url.rstrip('/')}/rest/api/3/issue/{ticket_id}"
 
         try:
-            # Create auth header (Basic auth with email:token)
             auth_string = base64.b64encode(f"{email}:{token}".encode()).decode()
             headers = {
                 "Authorization": f"Basic {auth_string}",
@@ -227,7 +224,6 @@ class JiraTool:
             with urllib.request.urlopen(request, timeout=30) as response:
                 data = json.loads(response.read().decode())
 
-            # Extract relevant fields
             fields = data.get("fields", {})
             ticket_data = {
                 "id": data.get("key", ticket_id),

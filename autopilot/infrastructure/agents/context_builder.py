@@ -76,14 +76,14 @@ class ContextBuilderAgent:
                 "context": {"error": "No ticket ID provided", "sources": []},
             }
 
-        # Step 1: Fetch ticket from Jira
-        ticket_data = self._fetch_ticket(ticket_id)
+        if ticket_input.get("_prefetched"):
+            ticket_data = {k: v for k, v in ticket_input.items() if k != "_prefetched"}
+        else:
+            ticket_data = self._fetch_ticket(ticket_id)
 
-        # Step 2: Search related notes in Obsidian
         search_query = self._build_search_query(ticket_data)
         obsidian_notes = self._search_obsidian(search_query)
 
-        # Step 3: Assemble context
         context = {
             "sources": [],
             "related_notes": obsidian_notes,
@@ -113,6 +113,10 @@ class ContextBuilderAgent:
             "ticket": ticket_data,
             "context": context,
         }
+
+    def fetch_ticket(self, ticket_id: str) -> dict[str, Any]:
+        """Fetch ticket data for workspace preflight."""
+        return self._fetch_ticket(ticket_id)
 
     def _fetch_ticket(self, ticket_id: str) -> dict[str, Any]:
         """Fetch ticket details from Jira.
@@ -217,6 +221,7 @@ class ContextBuilderAgent:
         prefix_map = {
             "WTS": "WTS",
             "CULQI": "CULQI",
+            "DFX5": "DFX5",
         }
 
         return prefix_map.get(prefix, "")

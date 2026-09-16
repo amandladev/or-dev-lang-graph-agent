@@ -9,6 +9,7 @@ class Config:
 
     vault_location: str
     workspace_location: str
+    worktree_root: str = ""
     available_mcps: list[str] = field(default_factory=list)
     llm_model: str = ""
     llm_provider: str = ""
@@ -17,6 +18,7 @@ class Config:
     base_delay: float = 2.0
     backoff_multiplier: float = 2.0
     verbosity: str = "normal"
+    approvals: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         """Validate configuration constraints after initialization."""
@@ -65,3 +67,13 @@ class Config:
                 f"verbosity: got '{self.verbosity}', "
                 f"expected one of {sorted(valid_verbosity)}"
             )
+
+        # Currently supported approval gates; new gates (e.g. "publish") can
+        # be added here once their gate node is wired in the graph.
+        valid_approvals = {"plan"}
+        for name in self.approvals:
+            if name not in valid_approvals:
+                raise ValueError(
+                    f"approvals: '{name}' is not a supported approval gate. "
+                    f"Supported: {sorted(valid_approvals)}"
+                )

@@ -16,9 +16,7 @@ from hypothesis import strategies as st
 
 from autopilot.application.registries.agent_registry import AgentRegistry
 
-# ---------------------------------------------------------------------------
 # Fake agent implementing AgentInterface protocol for testing
-# ---------------------------------------------------------------------------
 
 
 class FakeAgent:
@@ -60,9 +58,7 @@ class FakeAgent:
         return {"output": "fake result"}
 
 
-# ---------------------------------------------------------------------------
 # Strategies
-# ---------------------------------------------------------------------------
 
 # Generate valid agent names: non-empty printable strings
 agent_name_strategy = st.text(
@@ -80,9 +76,7 @@ unique_agent_names_strategy = st.lists(
 )
 
 
-# ---------------------------------------------------------------------------
 # Property-Based Tests
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)

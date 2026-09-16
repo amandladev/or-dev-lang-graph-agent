@@ -15,9 +15,7 @@ from hypothesis import strategies as st
 from autopilot.application.registries.tool_registry import ToolRegistry
 from autopilot.domain.interfaces.tool_interface import ToolInterface, ToolResult
 
-# ---------------------------------------------------------------------------
 # Fake tool implementation for testing
-# ---------------------------------------------------------------------------
 
 
 class FakeTool:
@@ -46,9 +44,7 @@ class FakeTool:
 assert isinstance(FakeTool("check"), ToolInterface)
 
 
-# ---------------------------------------------------------------------------
 # Strategies
-# ---------------------------------------------------------------------------
 
 # Generate non-empty tool names (printable strings, min 1 char)
 tool_name_strategy = st.text(
@@ -58,9 +54,7 @@ tool_name_strategy = st.text(
 )
 
 
-# ---------------------------------------------------------------------------
 # Property-Based Tests
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)

@@ -14,3 +14,6 @@ __all__ = [
     "ToolInterface",
     "ToolResult",
 ]
+from autopilot.domain.interfaces.workspace_manager import WorkspaceManagerInterface
+
+__all__ = ["WorkspaceManagerInterface"]

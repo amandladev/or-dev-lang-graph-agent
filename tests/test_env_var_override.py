@@ -17,9 +17,7 @@ from hypothesis import strategies as st
 
 from autopilot.infrastructure.adapters.yaml_config_loader import YAMLConfigLoader
 
-# ---------------------------------------------------------------------------
 # Strategies
-# ---------------------------------------------------------------------------
 
 # Non-empty strings for required path fields (vault_location, workspace_location)
 # Using yaml.safe_dump to write config, so we need to avoid YAML-special values
@@ -59,9 +57,7 @@ max_retries_strategy = st.integers(min_value=0, max_value=10)
 verbosity_strategy = st.sampled_from(["quiet", "normal", "verbose"])
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 # Environment variables that our tests set — we clean them up after each test
 _ENV_VARS = [
@@ -95,9 +91,7 @@ def _write_config_dict(tmp_dir: str, data: dict) -> str:
     return config_path
 
 
-# ---------------------------------------------------------------------------
 # Property-Based Tests
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)

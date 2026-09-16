@@ -20,11 +20,9 @@ def _distinct_pair_strategy(strategy):
     return st.tuples(strategy, strategy).filter(lambda pair: pair[0] != pair[1])
 
 
-# ---------------------------------------------------------------------------
 # Property 30: The documentation draft contains every step, file, and
 # evidence item supplied
 # Validates: Requirements 8.1
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -73,11 +71,9 @@ def test_draft_contains_every_step_file_and_evidence_item(
         assert item["data"]["status"] in draft
 
 
-# ---------------------------------------------------------------------------
 # Property 31: Empty file or evidence lists always produce their respective
 # placeholder text
 # Validates: Requirements 8.2, 8.3
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -127,11 +123,9 @@ def test_empty_evidence_produces_placeholder(plan, modified_files):
     assert "No test evidence recorded" in draft
 
 
-# ---------------------------------------------------------------------------
 # Property 32: Successful documentation generation always reports status
 # "generated"
 # Validates: Requirements 8.4
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)

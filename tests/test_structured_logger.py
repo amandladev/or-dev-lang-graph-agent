@@ -11,9 +11,7 @@ import pytest
 
 from autopilot.infrastructure.adapters.structured_logger import StructuredLogger
 
-# ---------------------------------------------------------------------------
 # Construction Tests
-# ---------------------------------------------------------------------------
 
 
 class TestConstructor:
@@ -44,9 +42,7 @@ class TestConstructor:
         assert logger.log_dir is None
 
 
-# ---------------------------------------------------------------------------
 # log_agent_start Tests
-# ---------------------------------------------------------------------------
 
 
 class TestLogAgentStart:
@@ -74,9 +70,7 @@ class TestLogAgentStart:
         assert captured.out == ""
 
 
-# ---------------------------------------------------------------------------
 # log_agent_completion Tests
-# ---------------------------------------------------------------------------
 
 
 class TestLogAgentCompletion:
@@ -137,9 +131,7 @@ class TestLogAgentCompletion:
         assert "output:" not in captured.out
 
 
-# ---------------------------------------------------------------------------
 # log_retry Tests
-# ---------------------------------------------------------------------------
 
 
 class TestLogRetry:
@@ -154,9 +146,7 @@ class TestLogRetry:
         assert "TestFailureError" in captured.err
 
 
-# ---------------------------------------------------------------------------
 # log_summary Tests
-# ---------------------------------------------------------------------------
 
 
 class TestLogSummary:
@@ -186,9 +176,7 @@ class TestLogSummary:
         assert "6 executed" in captured.out
 
 
-# ---------------------------------------------------------------------------
 # write_execution_log Tests
-# ---------------------------------------------------------------------------
 
 
 class TestWriteExecutionLog:

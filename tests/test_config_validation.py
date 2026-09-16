@@ -16,9 +16,7 @@ from hypothesis import strategies as st
 
 from autopilot.domain.entities.config import Config
 
-# ---------------------------------------------------------------------------
 # Strategies for valid values
-# ---------------------------------------------------------------------------
 
 # Valid MCP lists: 0 to 20 entries
 valid_mcps_strategy = st.lists(
@@ -40,9 +38,7 @@ valid_timeout_strategy = st.integers(min_value=1, max_value=600)
 valid_max_retries_strategy = st.integers(min_value=0, max_value=10)
 
 
-# ---------------------------------------------------------------------------
 # Strategies for invalid values
-# ---------------------------------------------------------------------------
 
 # Invalid MCP lists: 21+ entries
 invalid_mcps_strategy = st.lists(
@@ -70,9 +66,7 @@ invalid_max_retries_strategy = st.one_of(
 )
 
 
-# ---------------------------------------------------------------------------
 # Helper to build a Config with specific overrides
-# ---------------------------------------------------------------------------
 
 def make_config(**overrides) -> Config:
     """Create a Config instance with sensible defaults and given overrides."""
@@ -89,9 +83,7 @@ def make_config(**overrides) -> Config:
     return Config(**defaults)
 
 
-# ---------------------------------------------------------------------------
 # Property-Based Tests: Valid values are accepted
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -131,9 +123,7 @@ def test_valid_config_accepted(
     assert config.max_retries == retries
 
 
-# ---------------------------------------------------------------------------
 # Property-Based Tests: Invalid values are rejected with proper error messages
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)

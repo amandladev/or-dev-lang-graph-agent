@@ -97,8 +97,9 @@ class ObsidianTool:
 
         # Walk all markdown files
         for md_file in vault_dir.rglob("*.md"):
-            # Skip hidden directories and files
-            if any(part.startswith(".") for part in md_file.relative_to(vault_dir).parts):
+            # Skip files inside hidden directories (e.g. .obsidian/), but
+            # allow dotfiles at the vault root (e.g. .autopilot-rules.md)
+            if any(part.startswith(".") for part in md_file.relative_to(vault_dir).parts[:-1]):
                 continue
 
             try:
@@ -109,6 +110,7 @@ class ObsidianTool:
             # Score by keyword occurrences
             content_lower = content.lower()
             filename_lower = md_file.stem.lower()
+            rel_path_lower = str(md_file.relative_to(vault_dir)).lower()
 
             score = 0.0
             for kw in keywords:
@@ -116,6 +118,8 @@ class ObsidianTool:
                 score += content_lower.count(kw) * 1.0
                 # Filename matches (weighted higher)
                 score += filename_lower.count(kw) * 5.0
+                # Full path matches (e.g. ".autopilot-rules.md" queries)
+                score += rel_path_lower.count(kw) * 2.0
 
             if score > 0:
                 # Extract relevant excerpt

@@ -32,6 +32,7 @@ class ResumeCommand:
         graph_builder: GraphBuilder,
         serializer: SerializerInterface,
         config: Config,
+        workspace_manager=None,
     ) -> None:
         """Initialize the ResumeCommand use case.
 
@@ -45,39 +46,96 @@ class ResumeCommand:
         self._graph_builder = graph_builder
         self._serializer = serializer
         self._config = config
+        self._workspace_manager = workspace_manager
 
-    def execute(self) -> str:
+    def execute(self, ticket_id: str = "", answer: str = "") -> str:
+        """Resume a ticket while serializing access to its worktree.
+
+        Args:
+            ticket_id: The ticket whose workspace should be resumed.
+            answer: A human's answer to a pending clarification question.
+                Required (raises ValueError otherwise) when the persisted
+                state has a pending_question; ignored otherwise.
+        """
+        if ticket_id and self._workspace_manager is not None:
+            with self._workspace_manager.execution_lock(ticket_id):
+                return self._execute(ticket_id, answer)
+        return self._execute(ticket_id, answer)
+
+    def _execute(self, ticket_id: str = "", answer: str = "") -> str:
         """Resume a previously paused or failed workflow.
 
-        1. Load the most recent persisted state via serializer.load()
-        2. Inspect the logs to find the last agent with status "success"
-        3. Determine the next node in the graph (the node after the last successful one)
-        4. Build a resume graph starting from that node
-        5. Execute the graph via engine.execute()
-        6. Return a unique execution ID
+        Two resume paths:
+
+        - **Blocked on a clarification question**: the persisted state has
+          a pending_question. The human's answer is injected into context
+          and the graph resumes at the SAME node that asked (it never
+          produced valid output, so the next node can't run yet) — found
+          via pending_question["agent_name"], not the log heuristic below.
+        - **Otherwise** (paused/failed on a regular error): inspect the
+          logs to find the last agent with status "success", and resume
+          from the node after it.
 
         Returns:
             A unique execution ID (UUID) for tracking this resumed workflow run.
+
+        Raises:
+            ValueError: If the state is blocked on a clarification question
+                but no answer was provided.
         """
-        # 1. Load the most recent persisted state
         state_filepath = f"{self._config.workspace_location}/.autopilot_state.json"
+        if ticket_id and self._workspace_manager is not None:
+            workspace = self._workspace_manager.get_workspace(ticket_id)
+            state_filepath = f"{workspace.path}/.autopilot_state.json"
         restored_state = self._serializer.load(state_filepath)
 
-        # 2. Convert WorkflowState to a state dict for graph execution
         state_dict = self._state_to_dict(restored_state)
 
-        # 3. Identify the resume point from execution logs
-        resume_from = self._find_resume_node(state_dict.get("logs", []))
+        pending_question = state_dict.get("pending_question")
+        if pending_question:
+            if not answer:
+                question = pending_question.get("question", "")
+                raise ValueError(
+                    "This run is blocked on a clarification question and needs "
+                    f"an answer to resume: {question!r}. Pass it with "
+                    "`autopilot resume --ticket <id> --answer \"...\"`."
+                )
+            resume_from = _AGENT_TO_NODE.get(
+                pending_question.get("agent_name", ""), WORK_GRAPH_NODES[0]
+            )
+            state_dict = self._apply_clarification_answer(state_dict, pending_question, answer)
+        else:
+            resume_from = self._find_resume_node(state_dict.get("logs", []))
 
-        # 4. Build a resume graph starting from the identified node
         graph = self._graph_builder.build_resume_graph(resume_from)
 
-        # 5. Execute the graph via engine
         self._engine.execute(graph, state_dict)
 
-        # 6. Return a unique execution ID
         execution_id = str(uuid.uuid4())
         return execution_id
+
+    def _apply_clarification_answer(
+        self, state_dict: dict, pending_question: dict, answer: str
+    ) -> dict:
+        """Inject a human's answer into context and clear pending_question.
+
+        The answer lands in context (not the ticket) so PlannerAgent (and
+        any future agent wired the same way) picks it up via its existing
+        "context" input without a schema change to the ticket itself.
+
+        Args:
+            state_dict: The restored graph state.
+            pending_question: The pending_question dict from persisted state.
+            answer: The human's answer text.
+
+        Returns:
+            A new state dict with the answer in context and pending_question
+            cleared, ready to pass to engine.execute().
+        """
+        context = dict(state_dict.get("context", {}))
+        context["clarification_question"] = pending_question.get("question", "")
+        context["clarification_answer"] = answer
+        return {**state_dict, "context": context, "pending_question": None}
 
     def _find_resume_node(self, logs: list) -> str:
         """Identify the node to resume from based on execution logs.
@@ -183,4 +241,6 @@ class ResumeCommand:
             "errors": getattr(state, "errors", []),
             "metrics": getattr(state, "metrics", {}),
             "metadata": getattr(state, "metadata", {}),
+            "workspace": getattr(state, "workspace", {}),
+            "pending_question": getattr(state, "pending_question", None),
         }

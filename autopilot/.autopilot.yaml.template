@@ -15,6 +15,11 @@ vault_location: "/Users/sergioreyes/Documents/sergio/obsidian/wts-vault"
 # Override: AUTOPILOT_WORKSPACE_LOCATION
 workspace_location: "/Users/sergioreyes/Documents/dfx5/wts"
 
+# Root directory for one Git worktree per ticket. Leave empty to use a sibling
+# directory named .autopilot-worktrees next to workspace_location.
+# Override: AUTOPILOT_WORKTREE_ROOT
+worktree_root: ""
+
 # List of Model Context Protocol (MCP) server identifiers available for tool use.
 # Constraint: maximum 20 entries.
 # Override: AUTOPILOT_AVAILABLE_MCPS (comma-separated list)

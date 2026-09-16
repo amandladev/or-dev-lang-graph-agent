@@ -6,9 +6,17 @@ implementation plan with concrete steps for the Code_Executor to follow.
 Consults the Knowledge Engine for similar past experiences to inform planning.
 """
 
+import re
 from typing import Any
 
 from autopilot.application.registries.tool_registry import ToolRegistry
+from autopilot.domain.value_objects.exceptions import NeedsClarificationError
+
+# Marker OpenCode is instructed to use as the *entire* response when the
+# ticket is too ambiguous to plan confidently. Checked as an exact line
+# prefix (not a substring) so a step description that happens to mention
+# "needs clarification" in prose is never mistaken for the marker.
+CLARIFICATION_MARKER = "NEEDS_CLARIFICATION:"
 
 
 class PlannerAgent:
@@ -43,7 +51,7 @@ class PlannerAgent:
 
     @property
     def input_schema(self) -> dict[str, type]:
-        return {"ticket": dict, "context": dict}
+        return {"ticket": dict, "context": dict, "workspace": dict}
 
     @property
     def output_schema(self) -> dict[str, type]:
@@ -69,26 +77,55 @@ class PlannerAgent:
         """
         ticket = state.get("ticket", {})
         context = state.get("context", {})
+        workspace = state.get("workspace", {})
+        workspace = workspace if isinstance(workspace, dict) else {}
 
-        # Step 1: Query Knowledge Engine for relevant past experiences
         past_experiences = self._find_relevant_experiences(ticket, context)
 
-        # Step 2: Build the planning prompt (includes past experiences if found)
         prompt = self._build_prompt(ticket, context, past_experiences)
 
-        # Step 3: Execute via OpenCode
         try:
             opencode = self._tool_registry.get("opencode")
         except KeyError:
             return {"plan": self._fallback_plan(ticket)}
 
-        result = opencode.execute(prompt=prompt)
+        result = opencode.execute(prompt=prompt, cwd=workspace.get("path", ""))
 
         if result.success:
-            plan = self._parse_plan(result.data.get("result", ""), ticket)
+            raw = result.data.get("result", "")
+            question = self._extract_clarification(raw)
+            if question:
+                raise NeedsClarificationError(question)
+            plan = self._parse_plan(raw, ticket)
             return {"plan": plan}
         else:
             return {"plan": self._fallback_plan(ticket, error=result.error)}
+
+    @staticmethod
+    def _extract_clarification(response: str) -> str | None:
+        """Detect OpenCode asking for clarification instead of planning.
+
+        The prompt instructs OpenCode to respond with a single line starting
+        with the CLARIFICATION_MARKER when the ticket is genuinely too
+        ambiguous to plan. Only the first non-blank line is checked, so a
+        plan step that happens to mention the phrase mid-response doesn't
+        false-positive.
+
+        Args:
+            response: Raw text response from OpenCode.
+
+        Returns:
+            The question text if the marker was found, else None.
+        """
+        for line in response.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith(CLARIFICATION_MARKER):
+                question = stripped[len(CLARIFICATION_MARKER):].strip()
+                return question or "Clarification needed (no question text provided)."
+            return None
+        return None
 
     def _find_relevant_experiences(self, ticket: dict, context: dict) -> list:
         """Query Knowledge Engine for similar past experiences.
@@ -160,6 +197,20 @@ class PlannerAgent:
         for note in context.get("related_notes", [])[:3]:
             notes_text += f"\n--- {note.get('title', '')} ---\n{note.get('excerpt', '')}\n"
 
+        # A prior clarification round-trip: the human's answer to a question
+        # this same Planner raised on an earlier attempt (see resume_command).
+        clarification_text = ""
+        clarification_answer = context.get("clarification_answer")
+        if clarification_answer:
+            clarification_question = context.get("clarification_question", "")
+            clarification_text = (
+                "\nHUMAN CLARIFICATION (you asked this on a previous attempt "
+                "and a human answered — use it to resolve the ambiguity and "
+                "produce the plan now):\n"
+                f"  Q: {clarification_question}\n"
+                f"  A: {clarification_answer}\n"
+            )
+
         # Past experiences section
         experience_text = ""
         if past_experiences:
@@ -189,12 +240,25 @@ ADDITIONAL CONTEXT:
 RELATED DOCUMENTATION:
 {notes_text}
 {experience_text}
-Please respond with a clear implementation plan as a numbered list of steps.
+{clarification_text}
+If — and only if — this ticket is genuinely ambiguous (e.g. it allows two
+materially different valid implementations and picking wrong would mean
+redoing the work), respond with EXACTLY ONE line and nothing else:
+{CLARIFICATION_MARKER} <your specific question>
+Prefer making a reasonable, stated assumption and producing a real plan
+whenever you can — only ask if you truly cannot proceed safely.
+
+Otherwise, respond with a clear implementation plan as a numbered list of steps.
 Each step should describe:
-1. What to do (specific file changes, commands to run)
+1. What to do (specific file changes)
 2. Why (the reasoning)
+3. Which repository-relative files and modules are expected to change
+4. Any ticket IDs this work depends on, if applicable
 
 Keep it practical and actionable. Focus on the code changes needed.
+IMPORTANT: Do NOT include any git or version-control operations in the steps
+(branching, checkout, commit, push, pull, rebase, merge, reset). Autopilot
+handles branching, committing and pushing automatically after implementation.
 {('Consider the past experiences above — reuse approaches that worked.' if past_experiences else '')}
 """
         return prompt.strip()
@@ -246,10 +310,27 @@ Keep it practical and actionable. Focus on the code changes needed.
                 "agent": "Code_Executor",
             }]
 
+        expected_files = sorted({
+            path for step in steps for path in self._extract_files(step["description"])
+        })
+        affected_modules = sorted({
+            "/".join(path.split("/")[:2])
+            for path in expected_files
+            if "/" in path
+        })
+        depends_on = sorted({
+            dependency
+            for dependency in re.findall(r"\b[A-Z][A-Z0-9]+-\d+\b", response)
+            if dependency != ticket.get("id", "")
+        })
+
         return {
             "ticket_id": ticket.get("id", ""),
             "steps": steps,
             "raw_response": response,
+            "expected_files": expected_files,
+            "affected_modules": affected_modules,
+            "depends_on": depends_on,
         }
 
     def _fallback_plan(self, ticket: dict, error: str = "") -> dict:
@@ -267,6 +348,15 @@ Keep it practical and actionable. Focus on the code changes needed.
             {"step": 1, "description": f"Implement: {title}", "agent": "Code_Executor"},
         ]
         plan = {"ticket_id": ticket.get("id", ""), "steps": steps}
+        plan["expected_files"] = []
+        plan["affected_modules"] = []
+        plan["depends_on"] = []
         if error:
             plan["fallback_reason"] = error
         return plan
+
+    @staticmethod
+    def _extract_files(description: str) -> list[str]:
+        """Extract likely repository-relative file paths from a plan step."""
+        candidates = re.findall(r"(?<![\w./-])(?:[\w.-]+/)+[\w.-]+", description)
+        return sorted({path.rstrip(".,:;)") for path in candidates if "." in path})

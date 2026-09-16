@@ -22,9 +22,7 @@ from autopilot.infrastructure.agents.code_executor import CodeExecutorAgent
 from autopilot.infrastructure.agents.publisher import PublisherAgent
 from autopilot.infrastructure.agents.reviewer import ReviewerAgent
 
-# ---------------------------------------------------------------------------
 # Code_Executor: execution log returned as evidence
-# ---------------------------------------------------------------------------
 
 
 def _make_opencode_registry(results: list) -> MagicMock:
@@ -96,9 +94,7 @@ def test_code_executor_no_steps_returns_no_evidence():
     assert "evidence" not in output
 
 
-# ---------------------------------------------------------------------------
 # Engine: _serialize_state logs persistence failures instead of swallowing
-# ---------------------------------------------------------------------------
 
 
 class _FakeRegistry:
@@ -149,9 +145,7 @@ def test_serialize_state_does_not_crash_workflow_on_failure():
         )
 
 
-# ---------------------------------------------------------------------------
 # Publisher: _update_jira accurately reports skipped status
-# ---------------------------------------------------------------------------
 
 
 def test_update_jira_not_implemented_reports_skipped_true():
@@ -175,9 +169,7 @@ def test_update_jira_no_transition_configured_reports_skipped_true():
     assert "reason" in result
 
 
-# ---------------------------------------------------------------------------
 # Publisher: _load_rules falls back to defaults when the tool raises
-# ---------------------------------------------------------------------------
 
 
 def test_load_rules_falls_back_to_defaults_on_tool_failure():
@@ -202,10 +194,8 @@ def test_load_rules_falls_back_to_defaults_on_generic_exception():
     assert rules["source"] == "default"
 
 
-# ---------------------------------------------------------------------------
 # ReviewerAgent: stub-confirmation coverage
 # Validates: Requirements 9.1
-# ---------------------------------------------------------------------------
 
 
 def test_reviewer_agent_execute_always_raises_not_implemented_error():

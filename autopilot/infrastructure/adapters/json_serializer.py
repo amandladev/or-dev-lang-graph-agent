@@ -221,6 +221,8 @@ class JSONSerializer:
                 errors=decoded.get("errors", []),
                 metrics=decoded.get("metrics", {}),
                 metadata=decoded.get("metadata", {}),
+                workspace=decoded.get("workspace", {}),
+                pending_question=decoded.get("pending_question"),
             )
         except TypeError as e:
             raise DeserializationError(
@@ -281,6 +283,8 @@ class JSONSerializer:
             "errors": self._encode_value(state.errors),
             "metrics": self._encode_value(state.metrics),
             "metadata": self._encode_value(state.metadata),
+            "workspace": self._encode_value(state.workspace),
+            "pending_question": self._encode_value(state.pending_question),
         }
 
     def _encode_value(self, value: Any) -> Any:

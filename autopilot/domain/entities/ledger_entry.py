@@ -22,7 +22,7 @@ class LedgerEntry:
         ticket_id: Jira ticket ID processed.
         ticket_title: Title of the Jira ticket.
         timestamp: ISO timestamp when the entry was created.
-        status: Final status ("completed", "failed", "cancelled").
+        status: Final status ("completed", "failed", "cancelled", "blocked").
         verdict: Final verdict ("PASS", "PASS_WITH_OBS", "FAIL", "BLOCKED", None).
         modified_files: List of files modified during execution.
         duration_seconds: Total duration in seconds.
@@ -109,7 +109,11 @@ class LedgerEntry:
         """
         # Generate a short summary based on verdict
         verdict = record.verdict or "UNKNOWN"
-        summary = f"{verdict}: {record.tests_passed}/{record.tests_executed} tests passed"
+        if verdict == "BLOCKED":
+            question = record.metadata.get("pending_question", "")
+            summary = f"BLOCKED: waiting for clarification — {question[:80]}"
+        else:
+            summary = f"{verdict}: {record.tests_passed}/{record.tests_executed} tests passed"
 
         return cls(
             run_id=record.run_id,
@@ -143,7 +147,7 @@ class LedgerEntry:
             if field_name not in data:
                 warnings.append(f"Missing required field: {field_name}")
 
-        valid_statuses = ["completed", "failed", "cancelled"]
+        valid_statuses = ["completed", "failed", "cancelled", "blocked"]
         if data.get("status") not in valid_statuses:
             warnings.append(f"Invalid status: {data.get('status')!r}")
 

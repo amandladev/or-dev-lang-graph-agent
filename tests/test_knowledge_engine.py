@@ -18,9 +18,7 @@ from autopilot.domain.interfaces.knowledge_engine import KnowledgeEngineInterfac
 from autopilot.domain.value_objects.search_criteria import SearchCriteria
 from autopilot.infrastructure.knowledge.json_knowledge_engine import JsonKnowledgeEngine
 
-# ---------------------------------------------------------------------------
 # Experience entity tests
-# ---------------------------------------------------------------------------
 
 
 class TestExperience:
@@ -57,9 +55,7 @@ class TestExperience:
         assert exp.searchable_text() == ""
 
 
-# ---------------------------------------------------------------------------
 # SearchCriteria tests
-# ---------------------------------------------------------------------------
 
 
 class TestSearchCriteria:
@@ -81,9 +77,7 @@ class TestSearchCriteria:
             criteria.text = "changed"
 
 
-# ---------------------------------------------------------------------------
 # ExperienceBuilder tests
-# ---------------------------------------------------------------------------
 
 
 class TestExperienceBuilder:
@@ -169,9 +163,7 @@ class TestExperienceBuilder:
         assert exp.functional_domain == "payments"
 
 
-# ---------------------------------------------------------------------------
 # JsonKnowledgeEngine tests
-# ---------------------------------------------------------------------------
 
 
 class TestJsonKnowledgeEngine:

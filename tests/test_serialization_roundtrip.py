@@ -19,9 +19,7 @@ from autopilot.domain.value_objects.evidence import EvidenceItem
 from autopilot.domain.value_objects.log_entry import LogEntry, StepStatus
 from autopilot.infrastructure.adapters.json_serializer import JSONSerializer
 
-# ---------------------------------------------------------------------------
 # Strategies
-# ---------------------------------------------------------------------------
 
 # JSON-safe text: avoid null bytes and surrogates that don't survive JSON round-trip
 safe_text = st.text(
@@ -155,9 +153,7 @@ workflow_state_strategy = st.builds(
 )
 
 
-# ---------------------------------------------------------------------------
 # Property-Based Test
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
