@@ -114,18 +114,18 @@ class FakeOpenCodeTool:
                 "2. Add tests/test_feature.py covering the feature\n"
             )})
         if "execute step" in prompt.lower():
-            self._write_feature_files()
+            self._write_feature_files(Path(kwargs.get("cwd", self.workdir)))
             return ToolResult(
                 success=True,
                 data={"result": "Modified: src/feature.py\nCreated: tests/test_feature.py"},
             )
         return ToolResult(success=True, data={"result": "ok"})
 
-    def _write_feature_files(self) -> None:
-        src = self.workdir / "src"
+    def _write_feature_files(self, workdir: Path) -> None:
+        src = workdir / "src"
         src.mkdir(exist_ok=True)
         (src / "feature.py").write_text(FEATURE_SRC, encoding="utf-8")
-        tests = self.workdir / "tests"
+        tests = workdir / "tests"
         tests.mkdir(exist_ok=True)
         (tests / "test_feature.py").write_text(FEATURE_TEST, encoding="utf-8")
 
@@ -163,6 +163,8 @@ def e2e_sandbox(tmp_path):
         'pythonpath = ["."]\n',
         encoding="utf-8",
     )
+    subprocess.run(["git", "add", "pyproject.toml"], cwd=workspace, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "add project config"], cwd=workspace, check=True, capture_output=True)
 
     config_file = tmp_path / "e2e.yaml"
     config_file.write_text(
@@ -225,11 +227,12 @@ def test_full_workflow_end_to_end(e2e_app, e2e_sandbox):
     assert run_record.tests_failed == 0
     assert "src/feature.py" in run_record.modified_files
     assert "tests/test_feature.py" in run_record.modified_files
+    worktree = Path(run_record.workspace["path"])
 
     run_record_path = e2e_sandbox.workspace / "runs" / run_record.run_id / "run-record.json"
     assert run_record_path.exists()
 
-    state = json.loads((e2e_sandbox.workspace / ".autopilot_state.json").read_text(encoding="utf-8"))
+    state = json.loads((worktree / ".autopilot_state.json").read_text(encoding="utf-8"))
     assert any(e.get("type") == "test_result" for e in state["evidence"])
     assert state["metrics"]["published"] is True
     assert state["metadata"]["documentation_status"] == "generated"
@@ -254,6 +257,55 @@ def test_full_workflow_end_to_end(e2e_app, e2e_sandbox):
     assert len(fakes["opencode"].calls) == 3
 
 
+def test_dry_run_does_not_commit_or_push(e2e_app, e2e_sandbox):
+    app, fakes = e2e_app
+
+    run_record = app.work_command.execute("TEST-1", mode="dry-run")
+
+    assert run_record.status == "completed"
+    assert run_record.verdict == "PASS"
+    worktree = Path(run_record.workspace["path"])
+    state = json.loads((worktree / ".autopilot_state.json").read_text(encoding="utf-8"))
+    assert state["metrics"]["published"] is False
+    assert state["metrics"]["dry_run"] is True
+    assert state["metadata"]["mode"] == "dry-run"
+    assert "?? src/" in _git(worktree, "status", "--porcelain")
+    assert _git(worktree, "log", "-1", "--pretty=%s") == "add project config"
+
+    remote_refs = _git(e2e_sandbox.workspace, "ls-remote", "--heads", str(e2e_sandbox.remote))
+    assert "refs/heads/feature/test-1" not in remote_refs
+    mutating_jira_calls = [
+        call for call in fakes["jira"].calls if call.get("action") != "get_ticket"
+    ]
+    assert mutating_jira_calls == []
+
+
+def test_failed_tests_trigger_bounded_repair_then_publish(e2e_app, e2e_sandbox):
+    app, fakes = e2e_app
+    tester = app.engine._agent_registry.get("Tester")
+    test_results = [
+        {"success": False, "exit_code": 1, "output": "first attempt failed"},
+        {"success": True, "exit_code": 0, "output": "repair passed"},
+    ]
+
+    with patch.object(tester, "_run_tests", side_effect=test_results) as run_tests:
+        run_record = app.work_command.execute("TEST-1")
+
+    assert run_tests.call_count == 2
+    assert len(fakes["opencode"].calls) == 5
+    assert run_record.verdict == "PASS"
+    worktree = Path(run_record.workspace["path"])
+    state = json.loads((worktree / ".autopilot_state.json").read_text(encoding="utf-8"))
+    statuses = [
+        item["data"]["status"]
+        for item in state["evidence"]
+        if item.get("type") == "test_result"
+    ]
+    assert statuses == ["failed", "passed"]
+    assert state["metadata"]["test_attempts"] == 2
+    assert state["metrics"]["published"] is True
+
+
 def test_workflow_applies_vault_rules(e2e_app, e2e_sandbox):
     app, fakes = e2e_app
     rules = (
@@ -269,17 +321,32 @@ def test_workflow_applies_vault_rules(e2e_app, e2e_sandbox):
 
     assert run_record.status == "completed"
     assert run_record.verdict == "PASS"
+    worktree = Path(run_record.workspace["path"])
 
     branch = "feature/custom-test-1-implement-feature-x"
     assert branch in _git(e2e_sandbox.workspace, "branch", "--list")
     commit_msg = _git(e2e_sandbox.workspace, "log", "-1", "--pretty=%s", branch)
     assert commit_msg == "feat(TEST-1): [custom] Implement feature X"
 
-    state = json.loads((e2e_sandbox.workspace / ".autopilot_state.json").read_text(encoding="utf-8"))
+    state = json.loads((worktree / ".autopilot_state.json").read_text(encoding="utf-8"))
     assert state["metrics"]["rules_applied"] == "vault"
     jira_update = state["metrics"]["jira_update"]
     assert jira_update["skipped"] is True
     assert jira_update["transition"] == "In Progress -> Code Review"
+
+
+def test_multiple_tickets_run_in_separate_worktrees(e2e_app, e2e_sandbox):
+    app, _ = e2e_app
+
+    records = app.run_many(["TEST-1", "TEST-2"], approve=True)
+
+    assert set(records) == {"TEST-1", "TEST-2"}
+    paths = {record.workspace["path"] for record in records.values()}
+    branches = {record.workspace["branch"] for record in records.values()}
+    assert len(paths) == 2
+    assert branches == {"feature/test-1", "feature/test-2"}
+    for path in paths:
+        assert (Path(path) / "src" / "feature.py").exists()
 
 
 def test_cli_work_end_to_end(e2e_app, e2e_sandbox):

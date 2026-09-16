@@ -42,34 +42,20 @@ class ExperienceBuilder:
         modified_files = state.get("modified_files", [])
         errors = state.get("errors", [])
 
-        # Extract fields
         ticket_id = ticket.get("id", "")
         objective = ticket.get("title", "")
         description = ticket.get("description", "")
 
-        # Build summary from plan
         summary = self._build_summary(plan, evidence, errors)
-
-        # Infer domain from ticket labels and context
         domain = self._infer_domain(ticket, context)
-
-        # Infer technologies from modified files
         technologies = self._infer_technologies(modified_files)
-
-        # Extract decisions from plan steps
         decisions = self._extract_decisions(plan)
-
-        # Extract problems from errors
         problems = self._extract_problems(errors)
-
-        # Determine result
         result = self._determine_result(evidence, errors)
-
-        # Build tags from various sources
         tags = self._build_tags(ticket, domain, technologies)
-
-        # Infer repository from current directory
-        repository = os.path.basename(os.getcwd())
+        workspace = state.get("workspace", {})
+        repository_path = workspace.get("repository_path", "") if isinstance(workspace, dict) else ""
+        repository = os.path.basename(repository_path or os.getcwd())
 
         return Experience(
             id=str(uuid.uuid4()),

@@ -10,6 +10,8 @@ the persisted Workflow_State.
 import uuid
 from unittest.mock import MagicMock
 
+import pytest
+
 from autopilot.application.use_cases.resume_command import ResumeCommand
 from autopilot.domain.entities.config import Config
 from autopilot.domain.entities.workflow_state import WorkflowState
@@ -168,6 +170,79 @@ def test_resume_command_executes_graph_with_restored_state():
     state_dict = call_args[0][1]
     assert state_dict["ticket"] == {"id": "TICKET-42"}
     assert state_dict["context"] == {"notes": ["some context"]}
+
+
+def test_resume_without_answer_raises_when_blocked_on_clarification():
+    state = WorkflowState(
+        logs=[{"agent_name": "Context_Builder", "status": "success"}],
+        pending_question={
+            "agent_name": "Planner",
+            "question": "Should the CLI support OAuth or API keys?",
+            "asked_at": "2026-09-02T00:00:00Z",
+        },
+    )
+    config = _make_config()
+    serializer = _make_mock_serializer(state)
+    engine = _make_mock_engine()
+    builder = _make_mock_graph_builder()
+
+    cmd = ResumeCommand(engine=engine, graph_builder=builder, serializer=serializer, config=config)
+
+    with pytest.raises(ValueError, match="clarification"):
+        cmd.execute()
+
+    builder.build_resume_graph.assert_not_called()
+    engine.execute.assert_not_called()
+
+
+def test_resume_with_answer_resumes_at_the_asking_node_not_the_log_heuristic():
+    """pending_question wins over the log-based heuristic: logs say
+    Context_Builder succeeded (-> would resume at planner anyway here, but
+    the point is pending_question decides, not the log scan) and the node
+    that actually asked was Planner — resume must target planner exactly."""
+    state = WorkflowState(
+        logs=[{"agent_name": "Context_Builder", "status": "success"}],
+        pending_question={
+            "agent_name": "Planner",
+            "question": "Should the CLI support OAuth or API keys?",
+            "asked_at": "2026-09-02T00:00:00Z",
+        },
+    )
+    config = _make_config()
+    serializer = _make_mock_serializer(state)
+    engine = _make_mock_engine()
+    builder = _make_mock_graph_builder()
+
+    cmd = ResumeCommand(engine=engine, graph_builder=builder, serializer=serializer, config=config)
+    cmd.execute(answer="OAuth only.")
+
+    builder.build_resume_graph.assert_called_once_with("planner")
+
+
+def test_resume_with_answer_injects_it_into_context_and_clears_pending_question():
+    state = WorkflowState(
+        context={"existing": "value"},
+        pending_question={
+            "agent_name": "Planner",
+            "question": "Should the CLI support OAuth or API keys?",
+            "asked_at": "2026-09-02T00:00:00Z",
+        },
+    )
+    config = _make_config()
+    serializer = _make_mock_serializer(state)
+    engine = _make_mock_engine()
+    builder = _make_mock_graph_builder()
+
+    cmd = ResumeCommand(engine=engine, graph_builder=builder, serializer=serializer, config=config)
+    cmd.execute(answer="OAuth only.")
+
+    state_dict = engine.execute.call_args[0][1]
+    assert state_dict["context"]["existing"] == "value"
+    assert state_dict["context"]["clarification_question"] == (
+        "Should the CLI support OAuth or API keys?"
+    )
+    assert state_dict["context"]["clarification_answer"] == "OAuth only."
+    assert state_dict["pending_question"] is None
 
 
 def test_resume_command_publisher_success_resumes_documentation():

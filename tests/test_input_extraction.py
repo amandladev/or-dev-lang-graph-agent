@@ -17,17 +17,13 @@ from hypothesis import strategies as st
 from autopilot.application.orchestrator.engine import GraphState, OrchestrationEngine
 from autopilot.application.orchestrator.retry_policy import RetryPolicy
 
-# ---------------------------------------------------------------------------
 # All possible fields in GraphState
-# ---------------------------------------------------------------------------
 
 GRAPH_STATE_FIELDS = list(GraphState.__annotations__.keys())
 # ['ticket', 'context', 'modified_files', 'plan', 'logs', 'evidence', 'errors', 'metrics', 'metadata']
 
 
-# ---------------------------------------------------------------------------
 # Mock agent that records what input it receives
-# ---------------------------------------------------------------------------
 
 
 class RecordingAgent:
@@ -63,9 +59,7 @@ class RecordingAgent:
         return {"metrics": {"completed": True}}
 
 
-# ---------------------------------------------------------------------------
 # Mock dependencies
-# ---------------------------------------------------------------------------
 
 
 def create_mock_registry(agent: RecordingAgent) -> MagicMock:
@@ -97,9 +91,7 @@ def create_mock_config() -> MagicMock:
     return config
 
 
-# ---------------------------------------------------------------------------
 # Strategies
-# ---------------------------------------------------------------------------
 
 # Strategy: generate a non-empty subset of GraphState fields for an agent's input_schema
 input_schema_keys_strategy = st.lists(
@@ -116,9 +108,7 @@ state_value_strategy = st.one_of(
 )
 
 
-# ---------------------------------------------------------------------------
 # Property-Based Tests
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)

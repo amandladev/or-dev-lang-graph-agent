@@ -5,16 +5,16 @@ Covers Requirement 6 of core-orchestration-test-coverage.
 
 from unittest.mock import MagicMock
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from autopilot.domain.entities.experience import Experience
 from autopilot.domain.interfaces.tool_interface import ToolResult
+from autopilot.domain.value_objects.exceptions import NeedsClarificationError
 from autopilot.infrastructure.agents.planner import PlannerAgent
 
-# ---------------------------------------------------------------------------
 # Strategies
-# ---------------------------------------------------------------------------
 
 single_line_text_strategy = st.text(
     alphabet=st.characters(blacklist_characters="\n\r"),
@@ -37,10 +37,8 @@ def _make_tool_registry_with_opencode(tool_result: ToolResult) -> MagicMock:
     return registry, opencode
 
 
-# ---------------------------------------------------------------------------
 # Property 19: Numbered-line OpenCode responses parse into one step per line
 # Validates: Requirements 6.1
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -69,11 +67,9 @@ def test_numbered_line_response_parses_one_step_per_line(descriptions: list[str]
         assert "description" in step
 
 
-# ---------------------------------------------------------------------------
 # Property 20: Responses with no numbered lines collapse to a single
 # whole-text step
 # Validates: Requirements 6.6
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -96,11 +92,9 @@ def test_no_numbered_lines_collapses_to_single_step(response_text: str):
     assert steps[0]["description"] == response_text.strip()
 
 
-# ---------------------------------------------------------------------------
 # Property 21: Missing or failing OpenCode tool always yields a single-step
 # fallback plan
 # Validates: Requirements 6.2, 6.3
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -144,11 +138,68 @@ def test_failing_opencode_tool_yields_single_step_fallback_with_reason(error_mes
     assert plan["fallback_reason"] == error_message
 
 
-# ---------------------------------------------------------------------------
+def test_clarification_marker_raises_needs_clarification_with_question():
+    registry, opencode = _make_tool_registry_with_opencode(
+        ToolResult(
+            success=True,
+            data={"result": "NEEDS_CLARIFICATION: Should the CLI support OAuth or API keys?"},
+        )
+    )
+    agent = PlannerAgent(tool_registry=registry)
+
+    with pytest.raises(NeedsClarificationError) as exc_info:
+        agent.execute({"ticket": {"id": "T-1"}, "context": {}})
+
+    assert exc_info.value.question == "Should the CLI support OAuth or API keys?"
+
+
+def test_clarification_marker_mid_response_is_not_treated_as_a_question():
+    """Only the first non-blank line is checked — a numbered plan whose text
+    happens to mention the marker mid-step is a real plan, not a question."""
+    response = "1. Handle the NEEDS_CLARIFICATION: case gracefully in the parser"
+    registry, opencode = _make_tool_registry_with_opencode(
+        ToolResult(success=True, data={"result": response})
+    )
+    agent = PlannerAgent(tool_registry=registry)
+
+    output = agent.execute({"ticket": {"id": "T-1"}, "context": {}})
+
+    assert len(output["plan"]["steps"]) == 1
+
+
+def test_clarification_answer_in_context_is_included_in_prompt():
+    registry, opencode = _make_tool_registry_with_opencode(
+        ToolResult(success=True, data={"result": "1. Implement OAuth as agreed"})
+    )
+    agent = PlannerAgent(tool_registry=registry)
+
+    context = {
+        "clarification_question": "Should the CLI support OAuth or API keys?",
+        "clarification_answer": "OAuth only, per the security team's guidance.",
+    }
+    agent.execute({"ticket": {"id": "T-1"}, "context": context})
+
+    prompt = opencode.execute.call_args.kwargs["prompt"]
+    assert "HUMAN CLARIFICATION" in prompt
+    assert "Should the CLI support OAuth or API keys?" in prompt
+    assert "OAuth only, per the security team's guidance." in prompt
+
+
+def test_no_clarification_answer_omits_human_clarification_section():
+    registry, opencode = _make_tool_registry_with_opencode(
+        ToolResult(success=True, data={"result": "1. Do it"})
+    )
+    agent = PlannerAgent(tool_registry=registry)
+
+    agent.execute({"ticket": {"id": "T-1"}, "context": {}})
+
+    prompt = opencode.execute.call_args.kwargs["prompt"]
+    assert "HUMAN CLARIFICATION" not in prompt
+
+
 # Property 22: The prompt mentions past experiences iff the knowledge engine
 # found any
 # Validates: Requirements 6.4, 6.7
-# ---------------------------------------------------------------------------
 
 
 def _make_experience(index: int) -> Experience:
@@ -185,10 +236,8 @@ def test_prompt_mentions_past_experiences_iff_found(num_experiences: int):
         assert "PAST EXPERIENCES" not in prompt
 
 
-# ---------------------------------------------------------------------------
 # Property 23: Knowledge-engine failures never prevent plan generation
 # Validates: Requirements 6.5
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)

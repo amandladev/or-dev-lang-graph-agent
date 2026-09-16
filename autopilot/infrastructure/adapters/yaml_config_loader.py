@@ -29,6 +29,9 @@ vault_location: ""
 # Path to the workspace directory (required)
 workspace_location: ""
 
+# Root directory where per-ticket Git worktrees are created (optional)
+worktree_root: ""
+
 # List of available MCP servers (max 20 entries)
 available_mcps: []
 
@@ -59,6 +62,12 @@ backoff_multiplier: 2.0
 # Logging verbosity: quiet, normal, or verbose
 # Override: AUTOPILOT_VERBOSITY
 verbosity: normal
+
+# Human-in-the-loop approval gates: list of gates that require explicit
+# human approval before continuing. Currently supported: plan
+# (approve the implementation plan before executing it).
+# Override: AUTOPILOT_APPROVALS (comma-separated)
+approvals: []
 """
 
 # Fields that must be present and non-empty in the config
@@ -154,6 +163,7 @@ class YAMLConfigLoader:
             config = Config(
                 vault_location=str(data.get("vault_location", "")),
                 workspace_location=str(data.get("workspace_location", "")),
+                worktree_root=str(data.get("worktree_root", "")),
                 available_mcps=data.get("available_mcps", []),
                 llm_model=str(data.get("llm_model", "")),
                 llm_provider=str(data.get("llm_provider", "")),
@@ -162,6 +172,7 @@ class YAMLConfigLoader:
                 base_delay=float(data.get("base_delay", 2.0)),
                 backoff_multiplier=float(data.get("backoff_multiplier", 2.0)),
                 verbosity=str(data.get("verbosity", "normal")),
+                approvals=data.get("approvals", []),
             )
         except (ValueError, TypeError) as e:
             print(f"Configuration validation error: {e}", file=sys.stderr)
@@ -215,6 +226,7 @@ class YAMLConfigLoader:
         field_types = {
             "vault_location": str,
             "workspace_location": str,
+            "worktree_root": str,
             "available_mcps": list,
             "llm_model": str,
             "llm_provider": str,
@@ -223,6 +235,7 @@ class YAMLConfigLoader:
             "base_delay": float,
             "backoff_multiplier": float,
             "verbosity": str,
+            "approvals": list,
         }
 
         for field_name, field_type in field_types.items():

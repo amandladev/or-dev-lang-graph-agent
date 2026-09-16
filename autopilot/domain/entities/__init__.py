@@ -5,6 +5,7 @@ from autopilot.domain.entities.experience import Experience
 from autopilot.domain.entities.plan import Plan
 from autopilot.domain.entities.ticket import Ticket
 from autopilot.domain.entities.workflow_state import WorkflowState
+from autopilot.domain.entities.workspace import Workspace
 
 __all__ = [
     "Config",
@@ -12,4 +13,5 @@ __all__ = [
     "Plan",
     "Ticket",
     "WorkflowState",
+    "Workspace",
 ]

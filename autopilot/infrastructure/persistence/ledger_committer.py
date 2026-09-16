@@ -8,8 +8,10 @@ concurrent commit conflicts.
 import logging
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
+from autopilot.infrastructure.persistence.file_lock import LedgerLock, lock_path_for
 log = logging.getLogger(__name__)
 
 
@@ -33,6 +35,7 @@ class LedgerCommitter:
             workspace: Root workspace directory containing the git repo.
         """
         self._workspace = Path(workspace)
+        self._index_file: str | None = None
 
     def _run_git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         """Run a git command.
@@ -50,6 +53,7 @@ class LedgerCommitter:
             capture_output=True,
             text=True,
             check=check,
+            env={**os.environ, **({"GIT_INDEX_FILE": self._index_file} if self._index_file else {})},
         )
 
     def _branch_exists(self, branch: str) -> bool:
@@ -93,6 +97,16 @@ class LedgerCommitter:
         message: str,
         files: list[str] | None = None,
     ) -> bool:
+        """Commit ledger data while serializing writers for this repository."""
+        with LedgerLock(lock_path_for(self._workspace / ".autopilot_ledger")):
+            return self._commitledger(ledger_path, message, files)
+
+    def _commitledger(
+        self,
+        ledger_path: str | Path,
+        message: str,
+        files: list[str] | None = None,
+    ) -> bool:
         """Commit ledger and optional files to the autopilot-results branch.
 
         Uses a single-writer pattern: stages the ledger, creates the commit
@@ -118,15 +132,6 @@ class LedgerCommitter:
             if not self._ensure_branch():
                 return False
 
-            # Stage the ledger
-            if Path(ledger_path).exists():
-                self._run_git("add", str(ledger_path))
-
-            # Stage additional files if provided
-            if files:
-                for f in files:
-                    self._run_git("add", f)
-
             # No changes to commit if the ledger already matches the branch
             if Path(ledger_path).exists() and not files:
                 rel = os.path.relpath(Path(ledger_path), self._workspace)
@@ -140,7 +145,17 @@ class LedgerCommitter:
                     log.info("No changes to commit")
                     return True
 
-            # Create the commit and advance the branch ref
+            fd, index_name = tempfile.mkstemp(prefix="autopilot-index-")
+            os.close(fd)
+            os.unlink(index_name)
+            self._index_file = index_name
+            self._run_git("read-tree", self.BRANCH_NAME)
+            if Path(ledger_path).exists():
+                self._run_git("add", str(ledger_path))
+            if files:
+                for f in files:
+                    self._run_git("add", f)
+
             tree = self._run_git("write-tree").stdout.strip()
             parent = self._run_git("rev-parse", self.BRANCH_NAME).stdout.strip()
             result = self._run_git(
@@ -154,15 +169,19 @@ class LedgerCommitter:
                 check=False,
             )
 
-            # Unstage what we staged, keeping the working tree intact
-            self._run_git("reset", "-q", check=False)
-
             log.info("Committed to %s: %s", self.BRANCH_NAME, message)
             return True
 
         except subprocess.CalledProcessError as e:
             log.error("Git error: %s", e.stderr)
             return False
+        finally:
+            if self._index_file:
+                try:
+                    os.unlink(self._index_file)
+                except FileNotFoundError:
+                    pass
+                self._index_file = None
 
     def get_last_commits(self, count: int = 10) -> list[dict]:
         """Get recent commits from the autopilot-results branch.

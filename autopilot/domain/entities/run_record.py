@@ -23,7 +23,7 @@ class RunRecord:
         finished_at: ISO timestamp when the run finished (None if still running).
         duration_seconds: Total duration in seconds (None if still running).
         mode: Execution mode ("live", "dry-run", "resume").
-        status: Current status ("running", "completed", "failed", "cancelled").
+        status: Current status ("running", "completed", "failed", "cancelled", "blocked").
         verdict: Final verdict ("PASS", "PASS_WITH_OBS", "FAIL", "BLOCKED", None).
         plan: The plan that was executed (None if not yet planned).
         modified_files: List of files modified during execution.
@@ -40,6 +40,7 @@ class RunRecord:
         cost_usd: Cost in USD (None if not tracked). Same caveat as
             tokens_used: never populated by the current codebase.
         metadata: Additional metadata for extensibility.
+        workspace: Ticket workspace metadata.
     """
 
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex)
@@ -64,6 +65,7 @@ class RunRecord:
     tokens_used: dict | None = None
     cost_usd: float | None = None
     metadata: dict = field(default_factory=dict)
+    workspace: dict = field(default_factory=dict)
 
     def mark_completed(self, verdict: str) -> None:
         """Mark the run as completed with a verdict.
@@ -96,6 +98,22 @@ class RunRecord:
             started = datetime.fromisoformat(self.started_at.replace("Z", "+00:00"))
             finished = datetime.fromisoformat(self.finished_at.replace("Z", "+00:00"))
             self.duration_seconds = int((finished - started).total_seconds())
+
+    def mark_blocked(self, question: str) -> None:
+        """Mark the run as blocked awaiting a human's answer.
+
+        Unlike mark_completed/mark_failed/mark_cancelled, this does not set
+        finished_at/duration_seconds: the run isn't done, it's paused, and
+        `autopilot resume --answer "..."` is expected to continue it from
+        the same node that asked. The question is kept on metadata so the
+        CLI and ledger can surface it without a schema change.
+
+        Args:
+            question: The question the agent needs answered to proceed.
+        """
+        self.status = "blocked"
+        self.verdict = "BLOCKED"
+        self.metadata["pending_question"] = question
 
     def mark_cancelled(self) -> None:
         """Mark the run as cancelled."""
@@ -169,6 +187,7 @@ class RunRecord:
             "tokens_used": self.tokens_used,
             "cost_usd": self.cost_usd,
             "metadata": self.metadata,
+            "workspace": self.workspace,
         }
 
     @classmethod
@@ -202,6 +221,7 @@ class RunRecord:
             tokens_used=data.get("tokens_used"),
             cost_usd=data.get("cost_usd"),
             metadata=data.get("metadata", {}),
+            workspace=data.get("workspace", {}),
         )
 
     @classmethod
@@ -220,7 +240,7 @@ class RunRecord:
             if field_name not in data:
                 warnings.append(f"Missing required field: {field_name}")
 
-        valid_statuses = ["running", "completed", "failed", "cancelled"]
+        valid_statuses = ["running", "completed", "failed", "cancelled", "blocked"]
         if data.get("status") not in valid_statuses:
             warnings.append(f"Invalid status: {data.get('status')!r}")
 

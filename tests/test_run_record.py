@@ -40,6 +40,15 @@ class TestRunRecord:
         assert record.status == "cancelled"
         assert record.finished_at is not None
 
+    def test_mark_blocked(self):
+        record = RunRecord()
+        record.mark_blocked("Which auth method should the CLI use?")
+        assert record.status == "blocked"
+        assert record.verdict == "BLOCKED"
+        assert record.metadata["pending_question"] == "Which auth method should the CLI use?"
+        assert record.finished_at is None
+        assert record.duration_seconds is None
+
     def test_add_log(self):
         record = RunRecord()
         record.add_log({"agent": "planner", "status": "success"})

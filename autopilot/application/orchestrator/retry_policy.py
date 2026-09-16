@@ -2,8 +2,11 @@
 
 from autopilot.domain.value_objects.error_record import ErrorType
 from autopilot.domain.value_objects.exceptions import (
+    ApprovalRejectedError,
     AuthenticationError,
+    CodeExecutionVerificationError,
     ConfigurationError,
+    NeedsClarificationError,
     SchemaViolationError,
     TestFailureError,
     ToolTimeoutError,
@@ -22,8 +25,10 @@ class RetryPolicy:
 
     NON_RETRYABLE_EXCEPTIONS: set[type] = {
         AuthenticationError,
+        ApprovalRejectedError,
         ConfigurationError,
         SchemaViolationError,
+        CodeExecutionVerificationError,
     }
 
     def __init__(
@@ -55,9 +60,13 @@ class RetryPolicy:
             exception: The exception instance to classify.
 
         Returns:
-            ErrorType.RETRYABLE if the exception is transient and recoverable,
-            ErrorType.NON_RETRYABLE otherwise.
+            ErrorType.NEEDS_CLARIFICATION if the agent is asking a question
+            rather than reporting a failure, ErrorType.RETRYABLE if the
+            exception is transient and recoverable, ErrorType.NON_RETRYABLE
+            otherwise.
         """
+        if isinstance(exception, NeedsClarificationError):
+            return ErrorType.NEEDS_CLARIFICATION
         for exc_type in self.RETRYABLE_EXCEPTIONS:
             if isinstance(exception, exc_type):
                 return ErrorType.RETRYABLE
@@ -71,11 +80,14 @@ class RetryPolicy:
 
         Returns:
             True if the exception matches (or subclasses) a type in either
-            RETRYABLE_EXCEPTIONS or NON_RETRYABLE_EXCEPTIONS. False means it
-            fell back to the NON_RETRYABLE default because it's an
-            unclassified/unexpected exception type — worth flagging
-            distinctly from deliberate business errors (auth/config/schema).
+            RETRYABLE_EXCEPTIONS or NON_RETRYABLE_EXCEPTIONS, or is a
+            NeedsClarificationError. False means it fell back to the
+            NON_RETRYABLE default because it's an unclassified/unexpected
+            exception type — worth flagging distinctly from deliberate
+            business errors (auth/config/schema).
         """
+        if isinstance(exception, NeedsClarificationError):
+            return True
         known = self.RETRYABLE_EXCEPTIONS | self.NON_RETRYABLE_EXCEPTIONS
         return any(isinstance(exception, exc_type) for exc_type in known)
 

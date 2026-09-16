@@ -29,11 +29,9 @@ verbosity: quiet
     return str(config_file)
 
 
-# ---------------------------------------------------------------------------
 # 10.1-10.3: create_application with valid fixture -> non-None attributes,
 # correct type, no exception
 # Validates: Requirements 10.1, 10.2, 10.3
-# ---------------------------------------------------------------------------
 
 
 def test_create_application_wires_all_components_without_error(bootstrap_config_path):
@@ -57,10 +55,8 @@ def test_create_application_engine_is_orchestration_engine_instance(bootstrap_co
     assert isinstance(app.engine, OrchestrationEngine)
 
 
-# ---------------------------------------------------------------------------
 # 10.4: create_application with nonexistent config path -> SystemExit
 # Validates: Requirements 10.4
-# ---------------------------------------------------------------------------
 
 
 def test_create_application_nonexistent_config_path_raises_system_exit(tmp_path):

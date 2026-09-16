@@ -37,7 +37,7 @@ class TesterAgent:
 
     @property
     def input_schema(self) -> dict[str, type]:
-        return {"modified_files": list}
+        return {"modified_files": list, "workspace": dict}
 
     @property
     def output_schema(self) -> dict[str, type]:
@@ -61,21 +61,25 @@ class TesterAgent:
             Dict with "evidence" list containing test results.
         """
         modified_files = state.get("modified_files", [])
+        workspace = state.get("workspace", {})
+        workspace_path = workspace.get("path", "") if isinstance(workspace, dict) else ""
 
-        # Detect project type and test command
-        test_config = self._detect_test_config()
+        test_config = self._detect_test_config(workspace_path or None)
+        metadata = dict(memory_context or {})
+        metadata["test_attempts"] = int(metadata.get("test_attempts", 0)) + 1
 
         if not test_config:
+            metadata["test_status"] = "skipped"
             return {
                 "evidence": [{
                     "type": "test_result",
                     "description": "No test framework detected",
                     "data": {"status": "skipped", "reason": "No package.json or pyproject.toml found"},
-                }]
+                }],
+                "metadata": metadata,
             }
 
-        # Run the tests
-        result = self._run_tests(test_config)
+        result = self._run_tests(test_config, workspace_path or None)
 
         evidence = [{
             "type": "test_result",
@@ -89,17 +93,10 @@ class TesterAgent:
             },
         }]
 
-        # If tests failed, raise to trigger retry logic
-        if not result["success"]:
-            from autopilot.domain.value_objects.exceptions import TestFailureError
-            raise TestFailureError(
-                f"Tests failed (exit code {result['exit_code']}): "
-                f"{result['output'][-500:]}"
-            )
+        metadata["test_status"] = "passed" if result["success"] else "failed"
+        return {"evidence": evidence, "metadata": metadata}
 
-        return {"evidence": evidence}
-
-    def _detect_test_config(self) -> dict[str, str] | None:
+    def _detect_test_config(self, cwd: str | Path | None = None) -> dict[str, str] | None:
         """Detect the test framework and command from project files.
 
         Checks for common project config files in the current directory.
@@ -107,31 +104,38 @@ class TesterAgent:
         Returns:
             Dict with "framework" and "command" keys, or None if not detected.
         """
-        cwd = Path.cwd()
+        cwd = Path(cwd) if cwd else Path.cwd()
 
-        # Check for Node.js project
         package_json = cwd / "package.json"
         if package_json.exists():
             return self._parse_node_test_config(package_json)
 
-        # Check for Python project
         pyproject = cwd / "pyproject.toml"
         if pyproject.exists():
             return {"framework": "pytest", "command": "python3 -m pytest --tb=short"}
 
-        # Check for setup.py (older Python)
         setup_py = cwd / "setup.py"
         if setup_py.exists():
             return {"framework": "pytest", "command": "python3 -m pytest --tb=short"}
 
-        # Check for Makefile with test target
         makefile = cwd / "Makefile"
         if makefile.exists():
             content = makefile.read_text(encoding="utf-8", errors="ignore")
             if "test:" in content:
                 return {"framework": "make", "command": "make test"}
 
+        if self._has_python_tests(cwd):
+            return {"framework": "pytest", "command": "python3 -m pytest --tb=short"}
+
         return None
+
+    def _has_python_tests(self, cwd: Path) -> bool:
+        """Check for pytest-style test files in the working directory."""
+        if (cwd / "tests").is_dir():
+            return any((cwd / "tests").glob("test_*.py")) or any(
+                (cwd / "tests").glob("*_test.py")
+            )
+        return bool(list(cwd.glob("test_*.py")) + list(cwd.glob("*_test.py")))
 
     def _parse_node_test_config(self, package_json: Path) -> dict[str, str]:
         """Parse test command from package.json.
@@ -175,7 +179,7 @@ class TesterAgent:
 
         return {"framework": "npm-test", "command": "npm test"}
 
-    def _run_tests(self, test_config: dict[str, str]) -> dict[str, Any]:
+    def _run_tests(self, test_config: dict[str, str], cwd: str | Path | None = None) -> dict[str, Any]:
         """Execute the test command.
 
         Args:
@@ -192,7 +196,7 @@ class TesterAgent:
                 capture_output=True,
                 text=True,
                 timeout=180,  # 3 minutes max for tests
-                cwd=str(Path.cwd()),
+                cwd=str(cwd or Path.cwd()),
                 env={**os.environ},
             )
 

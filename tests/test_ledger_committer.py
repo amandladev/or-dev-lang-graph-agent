@@ -102,3 +102,13 @@ def test_commitledger_no_changes_restores_original_branch(git_repo):
 
     assert result is True
     assert _current_branch(git_repo) == "trunk"
+
+
+def test_commitledger_does_not_stage_user_changes(git_repo):
+    (git_repo / "README.md").write_text("user change\n")
+    _git(git_repo, "add", "README.md")
+    committer = LedgerCommitter(workspace=git_repo)
+
+    assert committer.commitledger(git_repo / "ledger.json", "ledger update") is True
+    staged = _git(git_repo, "diff", "--cached", "--name-only").stdout.strip()
+    assert staged == "README.md"

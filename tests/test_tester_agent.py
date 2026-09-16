@@ -9,17 +9,13 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from autopilot.domain.value_objects.exceptions import TestFailureError
 from autopilot.infrastructure.agents.tester import TesterAgent
 
-# ---------------------------------------------------------------------------
 # 5.1 (example): no test framework detected -> skipped, no subprocess.run call
 # Validates: Requirements 5.1
-# ---------------------------------------------------------------------------
 
 
 def test_no_test_framework_detected_returns_skipped_and_no_subprocess_call(
@@ -34,13 +30,13 @@ def test_no_test_framework_detected_returns_skipped_and_no_subprocess_call(
     evidence = output["evidence"]
     assert len(evidence) == 1
     assert evidence[0]["data"]["status"] == "skipped"
+    assert output["metadata"]["test_status"] == "skipped"
+    assert output["metadata"]["test_attempts"] == 1
     mock_run.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
 # 5.2 (example): pyproject.toml present + subprocess zero exit -> passed
 # Validates: Requirements 5.2
-# ---------------------------------------------------------------------------
 
 
 def test_pyproject_present_zero_exit_returns_passed(tmp_path, monkeypatch):
@@ -54,18 +50,17 @@ def test_pyproject_present_zero_exit_returns_passed(tmp_path, monkeypatch):
 
     evidence = output["evidence"]
     assert evidence[0]["data"]["status"] == "passed"
+    assert output["metadata"]["test_status"] == "passed"
 
 
-# ---------------------------------------------------------------------------
 # Property 18: Non-zero test-runner exit codes surface as a matching failure
 # message
 # Validates: Requirements 5.3
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(exit_code=st.integers(min_value=1, max_value=255))
-def test_non_zero_exit_code_raises_test_failure_error_with_exit_code(exit_code: int):
+def test_non_zero_exit_code_returns_failed_evidence_with_exit_code(exit_code: int):
     """Feature: core-orchestration-test-coverage, Property 18: Non-zero
     test-runner exit codes surface as a matching failure message.
 
@@ -83,16 +78,19 @@ def test_non_zero_exit_code_raises_test_failure_error_with_exit_code(exit_code: 
                 mock_run.return_value = MagicMock(
                     returncode=exit_code, stdout="", stderr="fail"
                 )
-                with pytest.raises(TestFailureError) as exc_info:
-                    agent.execute({"modified_files": []})
+                output = agent.execute(
+                    {"modified_files": []},
+                    memory_context={"test_attempts": 2},
+                )
 
-    assert str(exit_code) in str(exc_info.value)
+    assert output["evidence"][0]["data"]["status"] == "failed"
+    assert output["evidence"][0]["data"]["exit_code"] == exit_code
+    assert output["metadata"]["test_status"] == "failed"
+    assert output["metadata"]["test_attempts"] == 3
 
 
-# ---------------------------------------------------------------------------
 # 5.4 (edge case): subprocess.run raises TimeoutExpired
 # Validates: Requirements 5.4
-# ---------------------------------------------------------------------------
 
 
 def test_run_tests_timeout_expired_returns_failure_with_exit_code_negative_one():
@@ -107,10 +105,8 @@ def test_run_tests_timeout_expired_returns_failure_with_exit_code_negative_one()
     assert result["exit_code"] == -1
 
 
-# ---------------------------------------------------------------------------
 # 5.5 (example): package.json declaring a jest test script
 # Validates: Requirements 5.5
-# ---------------------------------------------------------------------------
 
 
 def test_package_json_jest_test_script_parses_jest_framework(tmp_path):
@@ -124,10 +120,8 @@ def test_package_json_jest_test_script_parses_jest_framework(tmp_path):
     assert config["command"] == "npm test"
 
 
-# ---------------------------------------------------------------------------
 # 5.6 (example): Makefile containing a "test:" line
 # Validates: Requirements 5.6
-# ---------------------------------------------------------------------------
 
 
 def test_makefile_with_test_target_detects_make_framework(tmp_path, monkeypatch):
@@ -141,10 +135,8 @@ def test_makefile_with_test_target_detects_make_framework(tmp_path, monkeypatch)
     assert config["command"] == "make test"
 
 
-# ---------------------------------------------------------------------------
 # 5.7 (edge case): subprocess.run raises FileNotFoundError
 # Validates: Requirements 5.7
-# ---------------------------------------------------------------------------
 
 
 def test_run_tests_file_not_found_returns_failure_with_exit_code_negative_one():

@@ -1,5 +1,7 @@
 """WorkCommand use case for initiating a full workflow execution."""
 
+from concurrent.futures import ThreadPoolExecutor
+
 from autopilot.application.orchestrator.engine import OrchestrationEngine
 from autopilot.application.orchestrator.graph_builder import GraphBuilder
 from autopilot.domain.entities.config import Config
@@ -20,6 +22,9 @@ class WorkCommand:
         graph_builder: GraphBuilder,
         config: Config,
         serializer: SerializerInterface,
+        approval_gate=None,
+        workspace_manager=None,
+        ticket_loader=None,
     ) -> None:
         """Initialize the WorkCommand use case.
 
@@ -28,13 +33,37 @@ class WorkCommand:
             graph_builder: Builder for constructing workflow graphs.
             config: Application configuration.
             serializer: Serializer for state persistence.
+            approval_gate: Optional ApprovalGate; its skip_all flag is set
+                when approve=True is passed to execute().
         """
         self._engine = engine
         self._graph_builder = graph_builder
         self._config = config
         self._serializer = serializer
+        self._approval_gate = approval_gate
+        self._workspace_manager = workspace_manager
+        self._ticket_loader = ticket_loader
 
-    def execute(self, ticket_id: str, ticket_title: str = "", mode: str = "live") -> RunRecord:
+    def execute(
+        self,
+        ticket_id: str,
+        ticket_title: str = "",
+        mode: str = "live",
+        approve: bool = False,
+    ) -> RunRecord:
+        """Execute one ticket while serializing runs for that ticket."""
+        if self._workspace_manager is not None:
+            with self._workspace_manager.execution_lock(ticket_id):
+                return self._execute(ticket_id, ticket_title, mode, approve)
+        return self._execute(ticket_id, ticket_title, mode, approve)
+
+    def _execute(
+        self,
+        ticket_id: str,
+        ticket_title: str = "",
+        mode: str = "live",
+        approve: bool = False,
+    ) -> RunRecord:
         """Execute a full work workflow for the given ticket.
 
         Creates a fresh initial state with the ticket ID set, builds the
@@ -45,20 +74,44 @@ class WorkCommand:
             ticket_id: The identifier of the ticket to process.
             ticket_title: Title of the Jira ticket.
             mode: Execution mode ("live", "dry-run").
+            approve: When True, auto-approves every human-in-the-loop gate.
 
         Returns:
             RunRecord with the execution results.
         """
-        # 1. Create RunRecord for tracking this execution
+        if approve and self._approval_gate is not None:
+            self._approval_gate.skip_all(True)
         run_record = self._engine.create_run_record(
             ticket_id=ticket_id,
             ticket_title=ticket_title,
             mode=mode,
         )
 
-        # 2. Create a fresh initial state with ticket.id set, all other fields empty/default
+        workspace_data = {}
+        initial_ticket = {"id": ticket_id}
+        if ticket_title:
+            initial_ticket["title"] = ticket_title
+        if self._workspace_manager is not None:
+            if self._ticket_loader is not None:
+                loaded_ticket = self._ticket_loader(ticket_id)
+                if isinstance(loaded_ticket, dict):
+                    initial_ticket = {**loaded_ticket, "id": ticket_id, "_prefetched": True}
+            try:
+                workspace = self._workspace_manager.create_workspace(
+                    initial_ticket,
+                    run_id=run_record.run_id,
+                    agent_id="workflow",
+                )
+            except Exception as exc:
+                run_record.mark_failed(str(exc))
+                self._engine.update_run_record(run_record)
+                raise
+            workspace_data = workspace.to_dict()
+            run_record.workspace = workspace_data
+            self._engine.update_run_record(run_record)
+
         initial_state = {
-            "ticket": {"id": ticket_id},
+            "ticket": initial_ticket,
             "context": {},
             "modified_files": [],
             "plan": {},
@@ -66,14 +119,30 @@ class WorkCommand:
             "evidence": [],
             "errors": [],
             "metrics": {},
-            "metadata": {},
+            "metadata": {"mode": mode, "test_attempts": 0},
+            "workspace": workspace_data,
         }
 
-        # 3. Build the work graph
         graph = self._graph_builder.build_work_graph()
 
-        # 4. Execute the graph via engine
         self._engine.execute(graph, initial_state, run_record=run_record)
 
-        # 5. Return the run record
         return run_record
+
+    def execute_many(
+        self,
+        ticket_ids: list[str],
+        mode: str = "live",
+        approve: bool = False,
+        max_workers: int | None = None,
+    ) -> dict[str, RunRecord]:
+        """Execute independent tickets concurrently in isolated worktrees."""
+        if not ticket_ids:
+            return {}
+
+        def run(ticket_id: str) -> tuple[str, RunRecord]:
+            return ticket_id, self.execute(ticket_id, mode=mode, approve=approve)
+
+        with ThreadPoolExecutor(max_workers=max_workers or len(ticket_ids)) as executor:
+            results = executor.map(run, ticket_ids)
+            return dict(results)

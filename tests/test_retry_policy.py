@@ -8,11 +8,10 @@ from hypothesis import strategies as st
 
 from autopilot.application.orchestrator.retry_policy import RetryPolicy
 from autopilot.domain.value_objects.error_record import ErrorType
+from autopilot.domain.value_objects.exceptions import NeedsClarificationError
 
-# ---------------------------------------------------------------------------
 # Property 13: Every listed retryable exception type classifies as retryable
 # Validates: Requirements 4.1
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -31,10 +30,8 @@ def test_retryable_exception_types_classify_retryable(exc_type: type, message: s
     assert policy.classify(exc) == ErrorType.RETRYABLE
 
 
-# ---------------------------------------------------------------------------
 # Property 14: Every listed non-retryable exception type classifies correctly
 # Validates: Requirements 4.2
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -55,10 +52,8 @@ def test_non_retryable_exception_types_classify_non_retryable(exc_type: type, me
     assert policy.classify(exc) == ErrorType.NON_RETRYABLE
 
 
-# ---------------------------------------------------------------------------
 # Property 15: Unrecognized exception types default to non-retryable
 # Validates: Requirements 4.3
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -78,10 +73,8 @@ def test_unrecognized_exception_type_defaults_to_non_retryable(name_suffix: int,
     assert policy.classify(exc) == ErrorType.NON_RETRYABLE
 
 
-# ---------------------------------------------------------------------------
 # is_recognized: distinguishes deliberately configured non-retryable errors
 # from unclassified/unexpected exception types (Finding 14).
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=50)
@@ -112,10 +105,29 @@ def test_is_recognized_false_for_unrecognized_types(name_suffix: int, message: s
     assert policy.is_recognized(exc) is False
 
 
-# ---------------------------------------------------------------------------
+@settings(max_examples=50)
+@given(question=st.text(min_size=1, max_size=80))
+def test_needs_clarification_error_classifies_as_needs_clarification(question: str):
+    policy = RetryPolicy(max_retries=3, base_delay=1.0, backoff_multiplier=2.0)
+    exc = NeedsClarificationError(question)
+    assert policy.classify(exc) == ErrorType.NEEDS_CLARIFICATION
+
+
+@settings(max_examples=50)
+@given(question=st.text(min_size=1, max_size=80))
+def test_needs_clarification_error_is_recognized(question: str):
+    policy = RetryPolicy(max_retries=3, base_delay=1.0, backoff_multiplier=2.0)
+    assert policy.is_recognized(NeedsClarificationError(question)) is True
+
+
+def test_needs_clarification_not_in_retryable_or_non_retryable_sets():
+    """NEEDS_CLARIFICATION is a distinct outcome, not folded into either set."""
+    assert NeedsClarificationError not in RetryPolicy.RETRYABLE_EXCEPTIONS
+    assert NeedsClarificationError not in RetryPolicy.NON_RETRYABLE_EXCEPTIONS
+
+
 # Property 16: Subclasses of retryable exceptions inherit retryable classification
 # Validates: Requirements 4.4
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -135,11 +147,9 @@ def test_subclass_of_retryable_type_classifies_retryable(base_type: type, messag
     assert policy.classify(exc) == ErrorType.RETRYABLE
 
 
-# ---------------------------------------------------------------------------
 # Property 17: Backoff delay follows the exponential formula for any attempt
 # and configuration
 # Validates: Requirements 4.5
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -182,10 +192,8 @@ def test_get_delay_formula_holds_generally(
     assert policy.get_delay(attempt) == expected
 
 
-# ---------------------------------------------------------------------------
 # 4.6: RETRYABLE_EXCEPTIONS and NON_RETRYABLE_EXCEPTIONS are disjoint
 # Validates: Requirements 4.6
-# ---------------------------------------------------------------------------
 
 
 def test_retryable_and_non_retryable_sets_are_disjoint():

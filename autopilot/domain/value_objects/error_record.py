@@ -9,6 +9,7 @@ class ErrorType(Enum):
 
     RETRYABLE = "retryable"
     NON_RETRYABLE = "non_retryable"
+    NEEDS_CLARIFICATION = "needs_clarification"
 
 
 @dataclass

@@ -14,9 +14,7 @@ from pathlib import Path
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 APPLICATION_PACKAGE_DIR = PROJECT_ROOT / "autopilot" / "application"
@@ -91,9 +89,7 @@ def _violates_forbidden_packages(module_name: str) -> bool:
     return False
 
 
-# ---------------------------------------------------------------------------
 # Property-Based Tests
-# ---------------------------------------------------------------------------
 
 # We need at least one module to sample from
 assert len(APPLICATION_MODULES) > 0, (

@@ -6,24 +6,21 @@ Validates: Requirements 1.1, 1.2, 1.3, 1.4, 2.1-2.7, 3.1-3.4, 4.1-4.3,
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from autopilot.infrastructure.agents.publisher import PublisherAgent
 
-# ---------------------------------------------------------------------------
 # Strategies
-# ---------------------------------------------------------------------------
 
 title_strategy = st.text(min_size=0, max_size=200)
 message_strategy = st.text(min_size=0, max_size=200)
 args_list_strategy = st.lists(st.text(min_size=1, max_size=20), min_size=1, max_size=5)
 
 
-# ---------------------------------------------------------------------------
 # Property 3-8: Branch slug sanitization
 # Validates: Requirements 2.1-2.7
-# ---------------------------------------------------------------------------
 
 @settings(max_examples=100)
 @given(title=title_strategy)
@@ -86,10 +83,8 @@ def test_branch_slug_max_length(title: str):
     assert len(slug) <= 30
 
 
-# ---------------------------------------------------------------------------
 # Unit tests: _sanitize_branch_slug edge cases
 # Validates: Requirements 2.1-2.7
-# ---------------------------------------------------------------------------
 
 def test_branch_slug_simple_title():
     assert PublisherAgent._sanitize_branch_slug("Fix Login Bug") == "fix-login-bug"
@@ -119,10 +114,8 @@ def test_branch_slug_truncation_lands_on_hyphen():
     assert len(slug) <= 30
 
 
-# ---------------------------------------------------------------------------
 # Property 9-10: Commit message sanitization
 # Validates: Requirements 3.1, 3.2, 3.3
-# ---------------------------------------------------------------------------
 
 @settings(max_examples=100)
 @given(message=message_strategy)
@@ -163,10 +156,8 @@ def test_commit_message_never_empty(message: str):
     assert sanitized != ""
 
 
-# ---------------------------------------------------------------------------
 # Unit tests: _sanitize_commit_message edge cases
 # Validates: Requirements 3.1, 3.2, 3.3
-# ---------------------------------------------------------------------------
 
 def test_commit_message_strips_crlf():
     assert PublisherAgent._sanitize_commit_message("feat: add x\r\ny") == "feat: add xy"
@@ -180,11 +171,9 @@ def test_commit_message_whitespace_only_falls_back():
     assert PublisherAgent._sanitize_commit_message("   ") == "Automated commit"
 
 
-# ---------------------------------------------------------------------------
 # Property 1, 2, 11-16: git command construction and stop-on-failure workflow
 # Validates: Requirements 1.1, 1.3, 1.4, 3.4, 4.1, 4.2, 4.3, 5.2, 5.3, 5.4,
 # 5.5, 5.7, 5.8
-# ---------------------------------------------------------------------------
 
 @settings(max_examples=100)
 @given(args=args_list_strategy)
@@ -298,10 +287,8 @@ def test_commit_step_message_is_distinct_arg(message: str):
         assert command[m_index + 1] == sanitized
 
 
-# ---------------------------------------------------------------------------
 # Unit tests: _execute_git_workflow scenarios
 # Validates: Requirements 1.1, 1.2, 4.1, 4.2, 4.3, 5.5, 5.7, 5.8
-# ---------------------------------------------------------------------------
 
 def _default_workflow_rules():
     return {
@@ -360,3 +347,48 @@ def test_execute_git_workflow_neutralizes_shell_metacharacters():
     called_args = checkout_branch_call[0][0]
     assert called_args == ["git", "checkout", "-b", branch_name]
     assert called_args[-1] == branch_name
+
+
+def test_execute_raises_publish_error_when_git_fails():
+    agent = PublisherAgent(tool_registry=MagicMock())
+    ticket = {"title": "Fix Login Bug", "id": "TICKET-1"}
+    state = {"ticket": ticket, "evidence": []}
+
+    with patch.object(agent, "_load_rules", return_value=_default_workflow_rules()), \
+         patch.object(agent, "_update_jira", return_value={"skipped": True}), \
+         patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="boom")
+
+        from autopilot.domain.value_objects.exceptions import PublishError
+        with pytest.raises(PublishError):
+            agent.execute(state)
+
+
+def test_execute_metrics_published_true_when_all_git_ops_succeed():
+    agent = PublisherAgent(tool_registry=MagicMock())
+    ticket = {"title": "Fix Login Bug", "id": "TICKET-1"}
+    state = {"ticket": ticket, "evidence": []}
+
+    with patch.object(agent, "_load_rules", return_value=_default_workflow_rules()), \
+         patch.object(agent, "_update_jira", return_value={"skipped": True}), \
+         patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="ok", stderr="")
+        output = agent.execute(state)
+
+    assert output["metrics"]["published"] is True
+
+
+def test_execute_dry_run_skips_all_external_mutations():
+    agent = PublisherAgent(tool_registry=MagicMock())
+    state = {"ticket": {"id": "TICKET-1"}, "evidence": [], "modified_files": ["src/app.py"]}
+
+    with patch.object(agent, "_load_rules") as load_rules, \
+         patch.object(agent, "_execute_git_workflow") as git_workflow, \
+         patch.object(agent, "_update_jira") as update_jira:
+        output = agent.execute(state, memory_context={"mode": "dry-run"})
+
+    assert output["metrics"]["published"] is False
+    assert output["metrics"]["dry_run"] is True
+    load_rules.assert_not_called()
+    git_workflow.assert_not_called()
+    update_jira.assert_not_called()

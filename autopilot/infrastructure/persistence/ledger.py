@@ -63,7 +63,6 @@ class Ledger:
         Returns:
             Total number of entries in the ledger after the operation.
         """
-        # Validate the entry
         warnings = LedgerEntry.validate(entry.to_dict())
         for w in warnings:
             print(f"WARN: {w}")
@@ -71,7 +70,6 @@ class Ledger:
         with LedgerLock(self._lock_path):
             data = self.load()
 
-            # Deduplicate by run_id unless keep_all
             if not keep_all:
                 data = [r for r in data if r.get("run_id") != entry.run_id]
 
@@ -135,14 +133,13 @@ class Ledger:
         lines: list[str] = []
         w = lines.append
 
-        w("# Autopilot — Resumen de ejecuciones\n")
-        w(f"Generado desde `{self._path.name}` · {len(data)} ejecución(es)"
-          + (f" · mostrando {len(displayed)}" if limit is not None and len(displayed) < len(data) else "")
+        w("# Autopilot — Run Summary\n")
+        w(f"Generated from `{self._path.name}` · {len(data)} runs"
+          + (f" · showing {len(displayed)}" if limit is not None and len(displayed) < len(data) else "")
           + "\n")
 
-        # 1. Status table
-        w("## Estado por ejecución\n")
-        w("| Run ID | Ticket | Título | Estado | Veredicto | Archivos | Duración |")
+        w("## Run Status\n")
+        w("| Run ID | Ticket | Title | Status | Verdict | Files | Duration |")
         w("|--------|--------|--------|--------|-----------|----------|----------|")
         for r in displayed:
             v = r.get("verdict", "—")
@@ -153,36 +150,34 @@ class Ledger:
               f"{v} | {files} | {dur} |")
         w("")
 
-        # 2. Aggregated stats (always over the full ledger)
         total = len(data)
         completed = sum(1 for r in data if r.get("status") == "completed")
         failed = sum(1 for r in data if r.get("status") == "failed")
         total_tests = sum(r.get("tests_executed", 0) for r in data)
         total_passed = sum(r.get("tests_passed", 0) for r in data)
 
-        w("## Estadísticas\n")
-        w(f"- Total ejecuciones: {total}")
-        w(f"- Completadas: {completed}")
-        w(f"- Fallidas: {failed}")
-        w(f"- Tests ejecutados: {total_tests}")
-        w(f"- Tests pasados: {total_passed}")
+        w("## Statistics\n")
+        w(f"- Total runs: {total}")
+        w(f"- Completed: {completed}")
+        w(f"- Failed: {failed}")
+        w(f"- Tests executed: {total_tests}")
+        w(f"- Tests passed: {total_passed}")
         if total_tests > 0:
-            w(f"- Tasa de éxito: {total_passed / total_tests * 100:.1f}%")
+            w(f"- Pass rate: {total_passed / total_tests * 100:.1f}%")
         w("")
 
-        # 3. Per-ticket detail
-        w("## Detalle por ejecución\n")
+        w("## Run Details\n")
         for r in displayed:
             v = r.get("verdict", "—")
             dur = f"{r.get('duration_seconds', 0)}s" if r.get("duration_seconds") else "—"
             w(f"### `{r.get('run_id', '')[:8]}` — {r.get('ticket_id', '')} {r.get('ticket_title', '')}\n")
-            w(f"- Estado: {r.get('status', '')} · Veredicto: {v} · Duración: {dur}")
+            w(f"- Status: {r.get('status', '')} · Verdict: {v} · Duration: {dur}")
             if r.get("modified_files"):
-                w(f"- Archivos modificados: {', '.join(r['modified_files'][:5])}")
+                w(f"- Modified files: {', '.join(r['modified_files'][:5])}")
                 if len(r.get("modified_files", [])) > 5:
-                    w(f"  - ... y {len(r['modified_files']) - 5} más")
+                    w(f"  - ... and {len(r['modified_files']) - 5} more")
             if r.get("summary"):
-                w(f"- Resumen: {r['summary']}")
+                w(f"- Summary: {r['summary']}")
             w("")
 
         return "\n".join(lines)

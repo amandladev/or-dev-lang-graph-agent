@@ -14,11 +14,9 @@ from hypothesis import strategies as st
 from autopilot.application.orchestrator.engine import OrchestrationEngine
 from autopilot.application.orchestrator.retry_policy import RetryPolicy
 from autopilot.domain.entities.run_record import RunRecord
-from autopilot.domain.value_objects.exceptions import ToolTimeoutError
+from autopilot.domain.value_objects.exceptions import NeedsClarificationError, ToolTimeoutError
 
-# ---------------------------------------------------------------------------
 # Shared fakes (file-local, matching tests/test_state_merge.py convention)
-# ---------------------------------------------------------------------------
 
 
 class _FakeRegistry:
@@ -78,10 +76,8 @@ def _make_engine(agent, run_record_store=None, max_retries=3):
     )
 
 
-# ---------------------------------------------------------------------------
 # Property 1: Non-retryable exceptions stop the retry loop immediately
 # Validates: Requirements 1.1
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -111,11 +107,9 @@ def test_non_retryable_exception_stops_retry_loop_immediately(
     mock_sleep.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
 # Property 2: Retryable exceptions on every attempt exhaust the configured
 # retry budget
 # Validates: Requirements 1.2
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -139,11 +133,9 @@ def test_retryable_exception_every_attempt_exhausts_retry_budget(mock_sleep, mes
     assert agent.execute.call_count == 4  # max_retries + 1
 
 
-# ---------------------------------------------------------------------------
 # Property 3: A retryable failure followed by success returns the successful
 # output
 # Validates: Requirements 1.3
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -168,11 +160,9 @@ def test_retryable_failure_then_success_returns_output(mock_sleep, num_failures:
     assert mock_sleep.call_count == num_failures
 
 
-# ---------------------------------------------------------------------------
 # Property 4: Retry backoff delay matches RetryPolicy.get_delay for the
 # current attempt
 # Validates: Requirements 1.4
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -204,10 +194,8 @@ def test_sleep_called_with_get_delay_of_current_attempt(mock_sleep, num_failures
     assert actual_delays == expected_delays
 
 
-# ---------------------------------------------------------------------------
 # 1.5/1.6: Persisted error state example tests (fixed max_retries=3)
 # Validates: Requirements 1.5, 1.6, 1.7
-# ---------------------------------------------------------------------------
 
 
 @patch("autopilot.application.orchestrator.engine.time.sleep")
@@ -271,10 +259,71 @@ def test_non_retryable_persists_error_record_with_attempt_count_one(mock_sleep):
     assert persisted_error["exception_class"] == "ValueError"
 
 
-# ---------------------------------------------------------------------------
+# NeedsClarificationError: no retry, pending_question persisted, run_record
+# ends up BLOCKED (not FAIL) once it bubbles up through engine.execute().
+
+
+@patch("autopilot.application.orchestrator.engine.time.sleep")
+def test_needs_clarification_stops_immediately_with_no_retry(mock_sleep):
+    exc = NeedsClarificationError("Which auth method should the CLI use?")
+    agent = _make_agent(side_effect=exc)
+    engine = _make_engine(agent, max_retries=3)
+    node = engine.create_agent_node("Planner")
+
+    with pytest.raises(NeedsClarificationError):
+        node({})
+
+    assert agent.execute.call_count == 1
+    mock_sleep.assert_not_called()
+
+
+@patch("autopilot.application.orchestrator.engine.time.sleep")
+def test_needs_clarification_persists_pending_question_on_state(mock_sleep):
+    exc = NeedsClarificationError("Which auth method should the CLI use?")
+    agent = _make_agent(side_effect=exc)
+    serializer = MagicMock()
+    engine = OrchestrationEngine(
+        agent_registry=_FakeRegistry(agent),
+        serializer=serializer,
+        logger=_FakeLogger(),
+        retry_policy=RetryPolicy(max_retries=3, base_delay=1.0, backoff_multiplier=2.0),
+        config=_FakeConfig(),
+    )
+    node = engine.create_agent_node("Planner")
+
+    with pytest.raises(NeedsClarificationError):
+        node({})
+
+    persisted_state = serializer.persist.call_args.args[0]
+    assert persisted_state.pending_question == {
+        "agent_name": "Planner",
+        "question": "Which auth method should the CLI use?",
+        "asked_at": persisted_state.pending_question["asked_at"],
+    }
+    persisted_error = persisted_state.errors[-1]
+    assert persisted_error["exception_class"] == "NeedsClarificationError"
+    assert persisted_error["description"] == "Which auth method should the CLI use?"
+
+
+def test_needs_clarification_marks_run_record_blocked_not_failed():
+    """engine.execute() catching a NeedsClarificationError sets BLOCKED,
+    not FAILED — the run is paused, not broken."""
+    exc = NeedsClarificationError("Which auth method should the CLI use?")
+    graph = MagicMock()
+    graph.invoke.side_effect = exc
+    engine = _make_engine(_make_agent())
+    run_record = RunRecord()
+
+    with pytest.raises(NeedsClarificationError):
+        engine.execute(graph, {}, run_record=run_record)
+
+    assert run_record.status == "blocked"
+    assert run_record.verdict == "BLOCKED"
+    assert run_record.metadata["pending_question"] == "Which auth method should the CLI use?"
+
+
 # Finding 14: unrecognized non-retryable exceptions are flagged distinctly
 # from deliberately configured business errors (auth/config/schema).
-# ---------------------------------------------------------------------------
 
 
 @patch("autopilot.application.orchestrator.engine.time.sleep")
@@ -322,11 +371,8 @@ def test_recognized_non_retryable_exception_not_flagged_as_unclassified(mock_sle
     assert persisted_error["description"] == "missing vault_location"
 
 
-# ---------------------------------------------------------------------------
-# Property 5: Verdict reflects the pass/fail composition of test-result
-# evidence
+# Property 5: Verdict reflects the final test-result evidence
 # Validates: Requirements 2.1, 2.2, 2.3
-# ---------------------------------------------------------------------------
 
 
 test_result_strategy = st.lists(
@@ -351,7 +397,7 @@ def _build_evidence(entries: list[tuple[str, bool]]) -> list[dict]:
 @given(entries=test_result_strategy)
 def test_verdict_reflects_test_evidence_composition(entries: list[tuple[str, bool]]):
     """Feature: core-orchestration-test-coverage, Property 5: Verdict
-    reflects the pass/fail composition of test-result evidence.
+    reflects the final test-result evidence.
 
     **Validates: Requirements 2.1, 2.2, 2.3**
     """
@@ -363,24 +409,17 @@ def test_verdict_reflects_test_evidence_composition(entries: list[tuple[str, boo
 
     engine.execute(graph, {}, run_record=run_record)
 
-    total = len(entries)
-    passed = sum(1 for _, is_pass in entries if is_pass)
-    failed = total - passed
+    final_passed = bool(entries and entries[-1][1])
 
     assert run_record.status == "completed"
-    assert run_record.tests_executed == total
-    assert run_record.tests_passed == passed
-    assert run_record.tests_failed == failed
-    if total == 0 or passed == total:
-        assert run_record.verdict == "PASS"
-    else:
-        assert run_record.verdict == "FAIL"
+    assert run_record.tests_executed == (1 if entries else 0)
+    assert run_record.tests_passed == (1 if final_passed else 0)
+    assert run_record.tests_failed == (1 if entries and not final_passed else 0)
+    assert run_record.verdict == ("PASS" if final_passed else "FAIL")
 
 
-# ---------------------------------------------------------------------------
 # Property 6: A non-empty errors list always marks the run failed
 # Validates: Requirements 2.4
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -407,11 +446,9 @@ def test_non_empty_errors_marks_run_failed(errors: list[dict], entries: list[tup
     assert run_record.status == "failed"
 
 
-# ---------------------------------------------------------------------------
 # Property 7: The run-record store is saved exactly once, and reflects
 # failure on exception
 # Validates: Requirements 2.5, 2.6
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -458,10 +495,8 @@ def test_execute_success_path_saves_store_exactly_once(entries: list[tuple[str, 
     store.save.assert_called_once_with(run_record)
 
 
-# ---------------------------------------------------------------------------
 # Property 8: Omitting the RunRecord skips all run-record store interaction
 # Validates: Requirements 2.7
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -485,10 +520,8 @@ def test_execute_without_run_record_skips_store(entries: list[tuple[str, bool]])
     store.save.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
 # Property 9: Modified files pass through unchanged into the RunRecord
 # Validates: Requirements 2.8
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)

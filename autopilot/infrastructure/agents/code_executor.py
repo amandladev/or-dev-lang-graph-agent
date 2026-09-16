@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from autopilot.application.registries.tool_registry import ToolRegistry
+from autopilot.domain.value_objects.exceptions import CodeExecutionVerificationError
 
 
 class CodeExecutorAgent:
@@ -19,13 +20,15 @@ class CodeExecutorAgent:
     Tracks modified files and reports results.
     """
 
-    def __init__(self, tool_registry: ToolRegistry) -> None:
+    def __init__(self, tool_registry: ToolRegistry, logger=None) -> None:
         """Initialize CodeExecutorAgent with tool registry.
 
         Args:
             tool_registry: Registry for accessing tools by name.
+            logger: Optional StructuredLogger for per-step progress output.
         """
         self._tool_registry = tool_registry
+        self._logger = logger
 
     @property
     def name(self) -> str:
@@ -37,7 +40,7 @@ class CodeExecutorAgent:
 
     @property
     def input_schema(self) -> dict[str, type]:
-        return {"plan": dict, "context": dict}
+        return {"plan": dict, "context": dict, "workspace": dict}
 
     @property
     def output_schema(self) -> dict[str, type]:
@@ -62,6 +65,8 @@ class CodeExecutorAgent:
         """
         plan = state.get("plan", {})
         context = state.get("context", {})
+        workspace = state.get("workspace", {})
+        workspace_path = workspace.get("path", "") if isinstance(workspace, dict) else ""
         steps = plan.get("steps", [])
 
         if not steps:
@@ -78,6 +83,7 @@ class CodeExecutorAgent:
         for step in steps:
             step_num = step.get("step", 0)
             description = step.get("description", "")
+            total_steps = len(steps)
 
             if not description:
                 continue
@@ -85,8 +91,15 @@ class CodeExecutorAgent:
             # Build execution prompt with context
             prompt = self._build_execution_prompt(step, plan, context)
 
+            # Report progress before delegating to OpenCode
+            short = " ".join(description.split())[:80]
+            if self._logger is not None and hasattr(self._logger, "log_agent_progress"):
+                self._logger.log_agent_progress(
+                    "Code_Executor", f"step {step_num}/{total_steps}: {short}"
+                )
+
             # Execute via OpenCode
-            result = opencode.execute(prompt=prompt)
+            result = opencode.execute(prompt=prompt, cwd=workspace_path)
 
             step_result = {
                 "step": step_num,
@@ -116,16 +129,56 @@ class CodeExecutorAgent:
         # Prefer the ground-truth list of files actually changed in the
         # working tree over the free-text heuristic, which is likely to
         # under- or over-report depending on OpenCode's exact output format.
-        git_files = self._git_modified_files()
+        git_files = self._git_modified_files(workspace_path or None)
         if git_files is not None:
             modified_files = git_files
         else:
             modified_files = list(set(modified_files))
 
+        self._verify_expected_files(plan, workspace_path, modified_files)
+
         return {
             "modified_files": modified_files,
             "evidence": evidence,
         }
+
+    def _verify_expected_files(
+        self, plan: dict, workspace_path: str, modified_files: list[str]
+    ) -> None:
+        """Fail loudly if none of the plan's expected files landed in the workspace.
+
+        OpenCode runs as an external process; its own project/session
+        resolution can attach to a different directory than the one passed
+        via subprocess cwd and silently write there instead. When that
+        happens, `workspace_path` ends up with no real changes (at most the
+        engine's own state file), and every downstream agent would report a
+        false PASS on an effectively empty commit. Checking that at least
+        one expected file actually exists catches that failure mode without
+        flagging a legitimate partial implementation (where the Tester is
+        the right place to fail on incomplete work).
+
+        Args:
+            plan: The plan dict, optionally containing "expected_files".
+            workspace_path: The ticket's worktree path, if any.
+            modified_files: Ground-truth changed files from `git status`.
+        """
+        expected_files = plan.get("expected_files", []) if isinstance(plan, dict) else []
+        if not expected_files or not workspace_path:
+            return
+
+        base = Path(workspace_path)
+        found = any(
+            f in modified_files or (base / f).exists() for f in expected_files
+        )
+        if not found:
+            raise CodeExecutionVerificationError(
+                "None of the plan's expected files "
+                f"({expected_files}) were found in the workspace after "
+                f"execution ({workspace_path}); only {modified_files or 'no files'} "
+                "changed. OpenCode's changes likely landed outside this "
+                "workspace — check for a stale `opencode` session/server "
+                "attached to a different project directory."
+            )
 
     def _build_execution_prompt(self, step: dict, plan: dict, context: dict) -> str:
         """Build the execution prompt for a single plan step.
@@ -151,6 +204,9 @@ Important:
 - Make the minimal changes needed
 - Follow existing code style and patterns
 - Don't break existing functionality
+- Do NOT run any git commands (checkout, branch, commit, push, pull, rebase,
+  reset, merge). Autopilot handles version control automatically; only write
+  or modify files.
 """
         return prompt.strip()
 
@@ -178,7 +234,7 @@ Important:
                         break
         return files
 
-    def _git_modified_files(self) -> list[str] | None:
+    def _git_modified_files(self, cwd: str | Path | None = None) -> list[str] | None:
         """Get the list of files actually changed in the working tree via git.
 
         Uses `git status --porcelain` as the ground truth for what OpenCode
@@ -199,7 +255,7 @@ Important:
                 capture_output=True,
                 text=True,
                 timeout=30,
-                cwd=str(Path.cwd()),
+                cwd=str(cwd or Path.cwd()),
             )
         except Exception:
             return None

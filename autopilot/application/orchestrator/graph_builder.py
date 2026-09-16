@@ -8,6 +8,7 @@ from autopilot.application.orchestrator.engine import GraphState
 WORK_GRAPH_NODES = [
     "context_builder",
     "planner",
+    "plan_approval",
     "code_executor",
     "tester",
     "publisher",
@@ -28,13 +29,16 @@ NODE_AGENT_MAP = {
 class GraphBuilder:
     """Builds LangGraph workflow graphs for different execution modes."""
 
-    def __init__(self, engine) -> None:
+    def __init__(self, engine, approval_gate=None) -> None:
         """Initialize GraphBuilder with an OrchestrationEngine reference.
 
         Args:
             engine: The OrchestrationEngine instance used to create agent node functions.
+            approval_gate: Optional ApprovalGate for human-in-the-loop checkpoints.
+                When provided, gate nodes are inserted into the graphs.
         """
         self._engine = engine
+        self._approval_gate = approval_gate
 
     def build_work_graph(self):
         """Build the work workflow graph.
@@ -52,17 +56,19 @@ class GraphBuilder:
         """
         graph = StateGraph(GraphState)
 
-        # Add all nodes
         for node_name, agent_name in NODE_AGENT_MAP.items():
             graph.add_node(node_name, self._engine.create_agent_node(agent_name))
+        self._add_approval_nodes(graph)
 
-        # Add linear edges
         graph.add_edge(START, "context_builder")
         graph.add_edge("context_builder", "planner")
-        graph.add_edge("planner", "code_executor")
+        if self._approval_gate is None:
+            graph.add_edge("planner", "code_executor")
+        else:
+            graph.add_edge("planner", "plan_approval")
+            graph.add_edge("plan_approval", "code_executor")
         graph.add_edge("code_executor", "tester")
 
-        # Conditional edge after tester: route based on test results
         graph.add_conditional_edges(
             "tester",
             self._route_after_test,
@@ -110,18 +116,27 @@ class GraphBuilder:
                 f"Must be one of: {WORK_GRAPH_NODES}"
             )
 
+        # Gate nodes only exist when an ApprovalGate is wired; resume past
+        # a gate resumes at the node that follows it instead.
+        if resume_from == "plan_approval" and self._approval_gate is None:
+            resume_from = "code_executor"
+
         graph = StateGraph(GraphState)
 
-        # Add all nodes (same as work graph)
         for node_name, agent_name in NODE_AGENT_MAP.items():
             graph.add_node(node_name, self._engine.create_agent_node(agent_name))
+        self._add_approval_nodes(graph)
 
-        # START points to the resume node
         graph.add_edge(START, resume_from)
 
-        # Add edges for nodes from resume_from onward
+        # Add edges for nodes from resume_from onward (skipping gate nodes that
+        # are not wired when no ApprovalGate is configured)
         resume_index = WORK_GRAPH_NODES.index(resume_from)
-        remaining_nodes = WORK_GRAPH_NODES[resume_index:]
+        remaining_nodes = [
+            n
+            for n in WORK_GRAPH_NODES[resume_index:]
+            if n != "plan_approval" or self._approval_gate is not None
+        ]
 
         for i, node_name in enumerate(remaining_nodes):
             if node_name == "tester":
@@ -134,7 +149,6 @@ class GraphBuilder:
             elif node_name == "documentation":
                 graph.add_edge("documentation", END)
             else:
-                # Add edge to next node if not the last
                 next_index = i + 1
                 if next_index < len(remaining_nodes):
                     next_node = remaining_nodes[next_index]
@@ -142,13 +156,53 @@ class GraphBuilder:
 
         return graph.compile()
 
+    def _add_approval_nodes(self, graph: StateGraph) -> None:
+        """Add human-in-the-loop approval gate nodes to the graph.
+
+        Gate nodes are plain functions (not agents) that consult the
+        ApprovalGate. When no ApprovalGate is wired, no nodes are added and
+        the graph is fully linear.
+
+        Args:
+            graph: The StateGraph being built.
+        """
+        if self._approval_gate is None:
+            return
+        graph.add_node("plan_approval", self._make_approval_node("plan"))
+
+    def _make_approval_node(self, gate_name: str):
+        """Create a graph node function that enforces an approval gate.
+
+        Args:
+            gate_name: Identifier of the gate (e.g. "plan").
+
+        Returns:
+            A callable node function compatible with LangGraph state graphs.
+        """
+
+        def approval_node(state: dict) -> dict:
+            details: dict = {}
+            if gate_name == "plan":
+                details = {"plan": state.get("plan", {})}
+            approved = self._approval_gate.require(gate_name, details)
+            if not approved:
+                from autopilot.domain.value_objects.exceptions import (
+                    ApprovalRejectedError,
+                )
+
+                raise ApprovalRejectedError(
+                    f"Approval gate '{gate_name}' rejected by user"
+                )
+            return {}
+
+        return approval_node
+
     def _route_after_test(self, state: dict) -> str:
         """Conditional routing after the tester node.
 
-        Determines the next node based on the errors field in state:
-        - No errors: tests passed, proceed to publisher
-        - Last error is retryable: retry code_executor
-        - Last error is non-retryable or retries exhausted: pause (END)
+        Passed tests proceed to publishing. Failed tests return to the code
+        executor while the repair budget remains. Skipped tests and exhausted
+        failures stop before publishing.
 
         Args:
             state: The current graph state dictionary.
@@ -156,15 +210,13 @@ class GraphBuilder:
         Returns:
             One of "pass", "retry", or "pause" routing keys.
         """
-        errors = state.get("errors", [])
-        if not errors:
+        metadata = state.get("metadata", {})
+        test_status = metadata.get("test_status")
+        if test_status == "passed":
             return "pass"
 
-        # Check the most recent error for retry eligibility
-        last_error = errors[-1]
-        error_type = last_error.get("error_type", "")
-
-        if error_type == "retryable":
+        attempts = int(metadata.get("test_attempts", 0))
+        if test_status == "failed" and attempts <= self._engine.max_retries:
             return "retry"
 
         return "pause"

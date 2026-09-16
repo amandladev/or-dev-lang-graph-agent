@@ -21,3 +21,5 @@ class WorkflowState:
     errors: list[ErrorRecord] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    workspace: dict[str, Any] = field(default_factory=dict)
+    pending_question: dict[str, Any] | None = None

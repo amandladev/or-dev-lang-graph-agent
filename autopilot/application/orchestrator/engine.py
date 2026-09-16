@@ -30,6 +30,8 @@ class GraphState(TypedDict, total=False):
     errors: Annotated[list[dict], append_list]
     metrics: Annotated[dict, overwrite]
     metadata: Annotated[dict, overwrite]
+    workspace: Annotated[dict, overwrite]
+    pending_question: Annotated[dict | None, overwrite]
 
 
 class OrchestrationEngine:
@@ -94,6 +96,11 @@ class OrchestrationEngine:
         if self._run_record_store:
             self._run_record_store.save(record)
 
+    @property
+    def max_retries(self) -> int:
+        """Return the configured retry budget."""
+        return self._retry_policy.max_retries
+
     def create_agent_node(self, agent_name: str):
         """Create a LangGraph node function for the named agent.
 
@@ -114,25 +121,21 @@ class OrchestrationEngine:
         def node(state: dict) -> dict:
             agent = self._agent_registry.get(agent_name)
 
-            # Extract only the fields declared in the agent's input_schema
             input_data = {k: state.get(k) for k in agent.input_schema}
 
-            # Retrieve optional memory context from state metadata
             memory_context = state.get("metadata")
+            self._log_agent_event(agent_name, input_data, "agent.start", "running")
 
-            # Generate a meaningful start message based on agent type
             start_details = self._get_agent_start_details(agent_name, input_data)
             self._logger.log_agent_start(agent_name, start_details["action"], start_details.get("details"))
 
             start_time = time.time()
             last_exception: Exception | None = None
 
-            # Try execution with retry logic
             for attempt in range(self._retry_policy.max_retries + 1):
                 try:
                     output = agent.execute(input_data, memory_context=memory_context)
 
-                    # Success: log completion with summary
                     elapsed_ms = int((time.time() - start_time) * 1000)
                     summary = self._get_agent_summary(agent_name, output)
                     self._logger.log_agent_completion(
@@ -143,8 +146,11 @@ class OrchestrationEngine:
                         output_data=output,
                         summary=summary,
                     )
+                    self._log_agent_event(agent_name, input_data, "agent.execute", "success")
 
-                    # Persist state after successful node completion
+                    if agent_name == "Planner":
+                        self._logger.log_plan_steps(output.get("plan"))
+
                     self._persist_state(state, output)
 
                     return output
@@ -152,6 +158,37 @@ class OrchestrationEngine:
                 except Exception as exc:
                     last_exception = exc
                     error_type = self._retry_policy.classify(exc)
+
+                    if error_type == ErrorType.NEEDS_CLARIFICATION:
+                        # The agent isn't broken, it's asking a question.
+                        # Pause immediately (no retry — the question won't
+                        # answer itself) and persist it distinctly from a
+                        # failure so `autopilot resume --answer` can find it.
+                        question = getattr(exc, "question", str(exc))
+                        elapsed_ms = int((time.time() - start_time) * 1000)
+                        self._logger.log_agent_completion(
+                            agent_name=agent_name,
+                            elapsed_ms=elapsed_ms,
+                            status="blocked",
+                            summary=f"Needs clarification: {question[:100]}",
+                        )
+                        self._log_agent_event(agent_name, input_data, "agent.execute", "blocked")
+                        error_record = ErrorRecord(
+                            error_type=ErrorType.NEEDS_CLARIFICATION,
+                            description=question,
+                            agent_name=agent_name,
+                            attempt_count=attempt + 1,
+                            exception_class=type(exc).__name__,
+                        )
+                        pending_question = {
+                            "agent_name": agent_name,
+                            "question": question,
+                            "asked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        }
+                        self._persist_error_state(
+                            state, error_record, extra={"pending_question": pending_question}
+                        )
+                        raise
 
                     if error_type == ErrorType.NON_RETRYABLE:
                         # Non-retryable: immediate pause, no retry.
@@ -172,6 +209,7 @@ class OrchestrationEngine:
                             status="failed",
                             summary=f"Error: {str(exc)[:100]}",
                         )
+                        self._log_agent_event(agent_name, input_data, "agent.execute", "failed")
                         error_record = ErrorRecord(
                             error_type=ErrorType.NON_RETRYABLE,
                             description=description,
@@ -182,7 +220,6 @@ class OrchestrationEngine:
                         self._persist_error_state(state, error_record)
                         raise
 
-                    # Retryable: check if we have retries remaining
                     if attempt < self._retry_policy.max_retries:
                         self._logger.log_retry(
                             agent_name=agent_name,
@@ -190,18 +227,16 @@ class OrchestrationEngine:
                             max_attempts=self._retry_policy.max_retries,
                             error=str(exc),
                         )
-                        # Wait with exponential backoff before next attempt
                         delay = self._retry_policy.get_delay(attempt)
                         time.sleep(delay)
-                    # else: will fall through to exhaustion handling below
 
-            # All retries exhausted
             elapsed_ms = int((time.time() - start_time) * 1000)
             self._logger.log_agent_completion(
                 agent_name=agent_name,
                 elapsed_ms=elapsed_ms,
                 status="failed",
             )
+            self._log_agent_event(agent_name, input_data, "agent.execute", "failed")
             error_record = ErrorRecord(
                 error_type=ErrorType.RETRYABLE,
                 description=str(last_exception),
@@ -213,6 +248,24 @@ class OrchestrationEngine:
             raise last_exception  # type: ignore[misc]
 
         return node
+
+    def _log_agent_event(
+        self, agent_name: str, input_data: dict[str, Any], operation: str, status: str
+    ) -> None:
+        """Forward concurrent-run identity to loggers that support events."""
+        method = getattr(self._logger, "log_agent_event", None)
+        workspace = input_data.get("workspace", {})
+        if method is None or not isinstance(workspace, dict):
+            return
+        ticket = input_data.get("ticket", {})
+        method(
+            ticket_id=ticket.get("id", "") if isinstance(ticket, dict) else "",
+            agent_id=agent_name,
+            workspace_path=workspace.get("path", ""),
+            branch=workspace.get("branch", ""),
+            operation=operation,
+            status=status,
+        )
 
     def execute(self, graph: Any, initial_state: dict, run_record: RunRecord | None = None) -> dict:
         """Execute a compiled LangGraph graph.
@@ -228,17 +281,21 @@ class OrchestrationEngine:
         try:
             result = graph.invoke(initial_state)
 
-            # Update run record on success
             if run_record:
-                # Extract test counts from evidence
                 test_results = [e for e in result.get("evidence", [])
                                if e.get("type") == "test_result"]
-                tests_executed = len(test_results)
-                tests_passed = sum(
-                    1 for t in test_results
-                    if t.get("result", "").upper().startswith("PASS")
-                    or t.get("data", {}).get("status", "").lower() == "passed"
-                )
+                final_test = test_results[-1] if test_results else None
+                final_test_status = ""
+                if final_test:
+                    final_test_status = final_test.get("data", {}).get("status", "").lower()
+                    if not final_test_status:
+                        legacy_result = final_test.get("result", "").upper()
+                        if legacy_result.startswith("PASS"):
+                            final_test_status = "passed"
+                        elif legacy_result.startswith("FAIL"):
+                            final_test_status = "failed"
+                tests_executed = 1 if final_test else 0
+                tests_passed = 1 if final_test_status == "passed" else 0
 
                 run_record.update_test_counts(
                     executed=tests_executed,
@@ -246,17 +303,17 @@ class OrchestrationEngine:
                     failed=tests_executed - tests_passed,
                 )
                 run_record.modified_files = result.get("modified_files", [])
+                run_record.workspace = result.get("workspace", run_record.workspace)
 
-                # Determine verdict based on errors and test results
                 errors = result.get("errors", [])
                 if errors:
                     run_record.mark_failed(f"Workflow failed with {len(errors)} error(s)")
-                elif tests_executed > 0 and tests_passed == tests_executed:
+                elif final_test_status == "passed":
                     run_record.mark_completed("PASS")
-                elif tests_executed > 0:
+                elif final_test:
                     run_record.mark_completed("FAIL")
                 else:
-                    run_record.mark_completed("PASS")
+                    run_record.mark_completed("FAIL")
 
                 if self._run_record_store:
                     self._run_record_store.save(run_record)
@@ -264,9 +321,18 @@ class OrchestrationEngine:
             return result
 
         except Exception as exc:
-            # Update run record on failure
             if run_record:
-                run_record.mark_failed(str(exc))
+                from autopilot.domain.value_objects.exceptions import (
+                    ApprovalRejectedError,
+                    NeedsClarificationError,
+                )
+
+                if isinstance(exc, NeedsClarificationError):
+                    run_record.mark_blocked(exc.question)
+                elif isinstance(exc, ApprovalRejectedError):
+                    run_record.mark_cancelled()
+                else:
+                    run_record.mark_failed(str(exc))
                 if self._run_record_store:
                     self._run_record_store.save(run_record)
             raise
@@ -284,7 +350,9 @@ class OrchestrationEngine:
         merged = self._merge_state(current_state, agent_output)
         self._serialize_state(merged)
 
-    def _persist_error_state(self, current_state: dict, error_record: ErrorRecord) -> None:
+    def _persist_error_state(
+        self, current_state: dict, error_record: ErrorRecord, extra: dict[str, Any] | None = None
+    ) -> None:
         """Persist the last-good state with the error recorded.
 
         Appends the error to the state's errors list and persists. The failed
@@ -293,12 +361,14 @@ class OrchestrationEngine:
         Args:
             current_state: The state as it existed before the failed agent ran.
             error_record: The error record to append.
+            extra: Optional additional fields to overlay onto the persisted
+                state (e.g. "pending_question" for a clarification pause).
         """
         import dataclasses
 
         errors = list(current_state.get("errors", []))
         errors.append(dataclasses.asdict(error_record))
-        state_with_error = {**current_state, "errors": errors}
+        state_with_error = {**current_state, "errors": errors, **(extra or {})}
         self._serialize_state(state_with_error)
 
     def _merge_state(self, current_state: dict, agent_output: dict) -> dict:
@@ -348,8 +418,12 @@ class OrchestrationEngine:
                 errors=state.get("errors", []),
                 metrics=state.get("metrics", {}),
                 metadata=state.get("metadata", {}),
+                workspace=state.get("workspace", {}),
+                pending_question=state.get("pending_question"),
             )
-            storage_path = getattr(self._config, "workspace_location", ".")
+            workspace = state.get("workspace", {})
+            storage_path = workspace.get("path") if isinstance(workspace, dict) else None
+            storage_path = storage_path or getattr(self._config, "workspace_location", ".")
             filepath = f"{storage_path}/.autopilot_state.json"
             self._serializer.persist(workflow_state, filepath)
         except Exception as exc:

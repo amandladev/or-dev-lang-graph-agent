@@ -76,6 +76,41 @@ class StructuredLogger:
                     if v:
                         print(f"    {k}: {str(v)[:100]}")
 
+    def log_agent_progress(self, agent_name: str, detail: str) -> None:
+        """Emit a lightweight progress line for an in-flight agent.
+
+        Used for per-step progress (e.g. "step 2/6: ...") so the user can
+        follow what the agent is doing without full verbose streaming.
+
+        Args:
+            agent_name: The registered agent name.
+            detail: Short progress description.
+        """
+        if self._verbosity in ("normal", "verbose"):
+            print(f"    · {detail}")
+
+    def log_plan_steps(self, plan: dict | None) -> None:
+        """Print the plan steps after the Planner agent completes.
+
+        Args:
+            plan: The plan dict with a "steps" list.
+        """
+        if self._verbosity not in ("normal", "verbose"):
+            return
+        if not isinstance(plan, dict):
+            return
+        steps = plan.get("steps", [])
+        if not steps:
+            return
+        print("\n  Plan:")
+        for step in steps[:20]:
+            description = str(step.get("description", "")).strip()
+            if description:
+                print(f"    {step.get('step', '?')}. {description[:160]}")
+        if len(steps) > 20:
+            print(f"    ... and {len(steps) - 20} more")
+        print()
+
     def log_agent_completion(
         self,
         agent_name: str,
@@ -155,6 +190,49 @@ class StructuredLogger:
             message: The warning message to display.
         """
         print(f"  ⚠ {message}", file=sys.stderr)
+
+    def log_workspace_operation(
+        self,
+        ticket_id: str,
+        workspace_id: str,
+        workspace_path: str,
+        branch: str,
+        operation: str,
+        status: str,
+    ) -> None:
+        """Emit a compact structured workspace lifecycle event."""
+        event = {
+            "ticketId": ticket_id,
+            "workspaceId": workspace_id,
+            "workspacePath": workspace_path,
+            "branch": branch,
+            "operation": operation,
+            "status": status,
+        }
+        if self._verbosity != "quiet":
+            print(f"  [workspace] {json.dumps(event, ensure_ascii=True)}")
+
+    def log_agent_event(
+        self,
+        ticket_id: str,
+        agent_id: str,
+        workspace_path: str,
+        branch: str,
+        operation: str,
+        status: str,
+    ) -> None:
+        """Emit an agent event with enough identity for concurrent runs."""
+        if self._verbosity == "quiet":
+            return
+        event = {
+            "ticketId": ticket_id,
+            "agentId": agent_id,
+            "workspacePath": workspace_path,
+            "branch": branch,
+            "operation": operation,
+            "status": status,
+        }
+        print(f"  [agent] {json.dumps(event, ensure_ascii=True)}")
 
     def log_summary(
         self,

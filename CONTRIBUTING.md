@@ -1,68 +1,55 @@
-# Contribuir a Autopilot
+# Contributing to Autopilot
 
-Guía rápida de convenciones del proyecto para cualquier colaborador (humano o agente).
+A concise guide to the project conventions for human and automated contributors.
 
-## Arquitectura — regla de dependencias
+## Architecture and Dependency Rule
 
-El proyecto sigue Clean Architecture con tres capas:
+The project follows Clean Architecture with three layers:
 
 ```
-domain/          # Entidades, value objects, interfaces. CERO dependencias externas.
-application/     # Casos de uso, orquestador, registros. Depende solo de domain/.
-infrastructure/  # Agentes, tools, adapters, persistencia. Implementa las interfaces de domain/.
-cli/             # Click CLI. Puede depender de cualquier capa (es la capa más externa).
+domain/          # Entities, value objects, and interfaces. No external dependencies.
+application/     # Use cases, orchestration, and registries. Depends only on domain/.
+infrastructure/  # Agents, tools, adapters, and persistence. Implements domain interfaces.
+cli/             # Click CLI. The outermost layer may depend on any layer.
 ```
 
-**Regla:** las dependencias siempre apuntan hacia adentro
-(`infrastructure` → `application` → `domain`). `domain/` nunca importa de
-`application/` ni de `infrastructure/`; `application/` nunca importa de
-`infrastructure/`. Esto está verificado por
-[tests/test_domain_import_constraint.py](tests/test_domain_import_constraint.py) y
-[tests/test_application_import_constraint.py](tests/test_application_import_constraint.py) —
-si tu cambio los rompe, estás importando en la dirección equivocada.
+Dependencies always point inward (`infrastructure` → `application` → `domain`).
+The domain never imports application or infrastructure, and application never imports
+infrastructure. This is enforced by
+[tests/test_domain_import_constraint.py](tests/test_domain_import_constraint.py) and
+[tests/test_application_import_constraint.py](tests/test_application_import_constraint.py).
 
-## Convenciones de código
+## Code Conventions
 
-1. **Sin comentarios** en el código a menos que se pidan explícitamente (las
-   funciones/clases públicas sí llevan docstrings).
-2. **Type hints** en todas las funciones públicas.
-3. **Dataclasses** para entidades y value objects.
-4. **`ToolResult`** como tipo de retorno uniforme para todas las tools
-   (`success`, `data`, `error`).
-5. Nuevas dependencias externas van en `domain/interfaces/` como Protocol/ABC
-   antes de implementarse en `infrastructure/`.
+1. Avoid comments that merely narrate the code. Public functions and classes should have concise docstrings.
+2. Add type hints to all public functions.
+3. Use dataclasses for entities and value objects.
+4. Return `ToolResult` consistently from tools (`success`, `data`, `error`).
+5. Define new external dependencies as Protocols or ABCs in `domain/interfaces/` before implementing them in `infrastructure/`.
 
 ## Tests
 
 ```bash
-python3 -m pytest -q          # toda la suite
-python3 -m pytest -v tests/test_archivo.py   # un archivo específico
+python3 -m pytest -q
+python3 -m pytest -v tests/test_file.py
 ```
 
-- Los tests que ejercitan operaciones de git (`Path.cwd()`-dependientes, ver
-  `code_executor.py`/`ledger_committer.py`) deben usar `monkeypatch.chdir(tmp_path)`
-  con un repo git real, no mockear `subprocess` directamente.
-- Property-based tests con Hypothesis se usan para invariantes de persistencia
-  (ver `tests/test_atomic_write.py`, `tests/test_ledger_lock.py`).
-- Cualquier cambio en `domain/` o `application/` que agregue un import nuevo
-  debe correr `test_domain_import_constraint.py`/`test_application_import_constraint.py`
-  para confirmar que no rompe la regla de dependencias.
+- Tests for Git operations that depend on `Path.cwd()` should use
+  `monkeypatch.chdir(tmp_path)` with a real temporary Git repository.
+- Use Hypothesis for persistence invariants.
+- After adding imports in `domain/` or `application/`, run the import constraint tests.
 
-## Linters (opcional, recomendado)
+## Linters
 
-Si tenés `ruff` instalado (`pip install -e ".[dev]"` lo incluye):
+Install development dependencies with `pip install -e ".[dev]"`, then run:
 
 ```bash
 ruff check autopilot tests
 ruff format --check autopilot tests
 ```
 
-## Pull requests / cambios
+## Pull Requests
 
-- Un cambio de comportamiento en un agente/tool debe venir acompañado de un
-  test que lo cubra.
-- Si el cambio toca `README.md`, mantené la sección de
-  [Roadmap](README.md#roadmap--qué-falta-para-mejorar) sincronizada (mover
-  ítems de "pendiente" a "ya implementado" cuando corresponda).
-- No introduzcas nombres de clientes/empresas reales en ejemplos de
-  documentación — usá prefijos genéricos (`PROJ-123`, `ACME-456`, etc.).
+- Cover behavior changes to agents or tools with tests.
+- Keep the [roadmap](README.md#roadmap--whats-left-to-improve) synchronized with implementation changes.
+- Use generic ticket prefixes such as `PROJ-123` and `ACME-456`; do not introduce real customer or company names in examples.

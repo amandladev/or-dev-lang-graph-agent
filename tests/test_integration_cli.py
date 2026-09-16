@@ -129,12 +129,10 @@ def test_cli_help_shows_all_commands():
     assert "review" in result.output
 
 
-# ---------------------------------------------------------------------------
 # config_sanity_validator CLI wiring tests
 #
 # Feature: safe-persistence-and-config-validation
 # Validates: Requirements 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7
-# ---------------------------------------------------------------------------
 
 
 def _make_valid_config(tmp_path):
@@ -328,10 +326,8 @@ def test_cli_work_skip_validation_with_valid_config_skips_validate_environment_o
     mock_validate_env.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
 # Per-workspace run lock tests (`work` / `resume` must not race on the same
 # workspace's state file / git branch)
-# ---------------------------------------------------------------------------
 
 
 def test_cli_work_aborts_when_workspace_run_lock_already_held(tmp_path):
@@ -349,7 +345,7 @@ def test_cli_work_aborts_when_workspace_run_lock_already_held(tmp_path):
             result = runner.invoke(cli, ["work", "TICKET-1", "--skip-validation"])
 
     assert result.exit_code != 0
-    assert "ya hay un run" in result.output.lower()
+    assert "run is already active" in result.output.lower()
     app.work_command.execute.assert_not_called()
 
 
@@ -367,7 +363,7 @@ def test_cli_resume_aborts_when_workspace_run_lock_already_held(tmp_path):
             result = runner.invoke(cli, ["resume"])
 
     assert result.exit_code != 0
-    assert "ya hay un run" in result.output.lower()
+    assert "run is already active" in result.output.lower()
     app.resume_command.execute.assert_not_called()
 
 

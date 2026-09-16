@@ -41,10 +41,8 @@ def _edge_targets(rendered_graph, source: str, conditional: bool | None = None) 
     }
 
 
-# ---------------------------------------------------------------------------
 # 3.1: build_work_graph create_agent_node call counts
 # Validates: Requirements 3.1
-# ---------------------------------------------------------------------------
 
 
 def test_build_work_graph_calls_create_agent_node_once_per_node():
@@ -58,10 +56,8 @@ def test_build_work_graph_calls_create_agent_node_once_per_node():
     assert sorted(called_names) == sorted(NODE_AGENT_MAP.values())
 
 
-# ---------------------------------------------------------------------------
 # 3.2: build_work_graph returns compiled graph exposing invoke
 # Validates: Requirements 3.2
-# ---------------------------------------------------------------------------
 
 
 def test_build_work_graph_returns_compiled_graph_with_invoke():
@@ -74,10 +70,8 @@ def test_build_work_graph_returns_compiled_graph_with_invoke():
     assert callable(compiled.invoke)
 
 
-# ---------------------------------------------------------------------------
 # 3.3/3.4 (part): build_work_graph fixed node/edge topology
 # Validates: Requirements 3.3
-# ---------------------------------------------------------------------------
 
 
 def test_build_work_graph_has_fixed_topology():
@@ -97,11 +91,9 @@ def test_build_work_graph_has_fixed_topology():
     assert tester_conditional_targets == {"publisher", "code_executor", "__end__"}
 
 
-# ---------------------------------------------------------------------------
 # Property 10: Every graph-builder call wires exactly one node per registered
 # agent
 # Validates: Requirements 3.1, 3.4
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -136,10 +128,8 @@ def test_build_work_graph_call_matches_build_resume_graph_for_named_points():
         assert engine.create_agent_node.call_count == len(NODE_AGENT_MAP)
 
 
-# ---------------------------------------------------------------------------
 # 3.5 (example): build_resume_graph(resume_from="tester") branching
 # Validates: Requirements 3.5
-# ---------------------------------------------------------------------------
 
 
 def test_build_resume_graph_tester_has_same_conditional_branching_as_work_graph():
@@ -153,10 +143,8 @@ def test_build_resume_graph_tester_has_same_conditional_branching_as_work_graph(
     assert tester_conditional_targets == {"publisher", "code_executor", "__end__"}
 
 
-# ---------------------------------------------------------------------------
 # Property 11: An invalid resume node is rejected without touching the engine
 # Validates: Requirements 3.6
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -180,10 +168,8 @@ def test_build_resume_graph_invalid_node_raises_without_touching_engine(resume_f
     engine.create_agent_node.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
 # Property 12: Post-test routing is a total function of the last error's type
 # Validates: Requirements 3.7, 3.8, 3.9, 3.10, 3.11
-# ---------------------------------------------------------------------------
 
 
 error_type_strategy = st.one_of(
@@ -201,29 +187,30 @@ def _error_entry(error_type):
     return entry
 
 
-def test_route_after_test_empty_errors_returns_pass():
+def test_route_after_test_passed_status_returns_pass():
     """**Validates: Requirements 3.7**"""
     builder = GraphBuilder(engine=MagicMock())
-    assert builder._route_after_test({"errors": []}) == "pass"
+    assert builder._route_after_test({"metadata": {"test_status": "passed"}}) == "pass"
 
 
-@settings(max_examples=100)
-@given(
-    earlier_types=st.lists(error_type_strategy, min_size=0, max_size=5),
-    last_type=error_type_strategy,
+@pytest.mark.parametrize(
+    ("status", "attempts", "max_retries", "expected"),
+    [
+        ("failed", 1, 1, "retry"),
+        ("failed", 2, 1, "pause"),
+        ("skipped", 1, 3, "pause"),
+        (None, 0, 3, "pause"),
+    ],
 )
-def test_route_after_test_depends_only_on_last_error_type(earlier_types, last_type):
-    """Feature: core-orchestration-test-coverage, Property 12: Post-test
-    routing is a total function of the last error's type.
+def test_route_after_test_enforces_status_and_retry_budget(
+    status, attempts, max_retries, expected
+):
+    engine = MagicMock()
+    engine.max_retries = max_retries
+    builder = GraphBuilder(engine=engine)
 
-    **Validates: Requirements 3.7, 3.8, 3.9, 3.10, 3.11**
-    """
-    builder = GraphBuilder(engine=MagicMock())
-    errors = [_error_entry(t) for t in earlier_types] + [_error_entry(last_type)]
+    result = builder._route_after_test({
+        "metadata": {"test_status": status, "test_attempts": attempts}
+    })
 
-    result = builder._route_after_test({"errors": errors})
-
-    if last_type == "retryable":
-        assert result == "retry"
-    else:
-        assert result == "pause"
+    assert result == expected

@@ -16,9 +16,7 @@ from hypothesis import strategies as st
 from autopilot.application.orchestrator.engine import OrchestrationEngine, append_list, overwrite
 from autopilot.application.orchestrator.retry_policy import RetryPolicy
 
-# ---------------------------------------------------------------------------
 # Strategies
-# ---------------------------------------------------------------------------
 
 # Simple JSON-compatible values for scalar/object fields
 json_primitive_strategy = st.one_of(
@@ -52,9 +50,7 @@ dict_list_strategy = st.lists(
 )
 
 
-# ---------------------------------------------------------------------------
 # Property-Based Tests: append_list reducer
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -103,9 +99,7 @@ def test_append_list_preserves_original_order(existing: list[str], new: list[str
     assert result[len(existing) :] == new
 
 
-# ---------------------------------------------------------------------------
 # Property-Based Tests: overwrite reducer
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -138,9 +132,7 @@ def test_overwrite_returns_new_for_any_value(existing: Any, new: Any):
     assert result is new
 
 
-# ---------------------------------------------------------------------------
 # Property-Based Tests: OrchestrationEngine._merge_state
-# ---------------------------------------------------------------------------
 
 
 class _FakeRegistry:

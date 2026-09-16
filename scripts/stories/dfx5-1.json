@@ -1,0 +1,24 @@
+{
+  "key": "DFX5-1",
+  "fields": {
+    "summary": "Implement hello feature",
+    "description": "Implement a small feature in this repository:\n1. Create src/hello.py with a function hello() that returns the string 'hello'.\n2. Create tests/test_hello.py with a test that asserts hello() == 'hello'.\n3. Create a minimal .gitignore that excludes Python cache directories (__pycache__/ and *.pyc).\nMake the minimal changes needed and follow existing code style. Check the vault documentation for project conventions before planning.",
+    "status": {"name": "In Progress"},
+    "project": {"key": "DFX5"},
+    "issuetype": {"name": "Task"},
+    "assignee": {"displayName": "Autopilot E2E"},
+    "priority": {"name": "Medium"},
+    "labels": ["e2e", "feature"],
+    "created": "2026-08-19T10:00:00.000-0500",
+    "updated": "2026-08-19T10:00:00.000-0500",
+    "comment": {
+      "comments": [
+        {
+          "author": {"displayName": "Product Owner"},
+          "body": "Please implement this small feature following the conventions.",
+          "created": "2026-08-19T10:05:00.000-0500"
+        }
+      ]
+    }
+  }
+}

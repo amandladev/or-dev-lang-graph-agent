@@ -1,0 +1,24 @@
+{
+  "key": "DFX5-2",
+  "fields": {
+    "summary": "Implement task manager CLI",
+    "description": "Implement a small task manager CLI in this repository using only the Python standard library (no third-party dependencies).\n\n1. Create src/todo.py with these functions:\n   - add_task(tasks, description) -> appends {'description': ..., 'done': False} with a unique sequential id.\n   - complete_task(tasks, task_id) -> marks the task with the given id as done; raises ValueError if the id does not exist.\n   - list_tasks(tasks) -> returns pending tasks first, then completed ones.\n   - stats(tasks) -> returns a dict with counts: total, pending, done.\n2. Create tests/test_todo.py with pytest tests covering: adding tasks, completing tasks, the not-found error case, ordering (pending first) and stats counts.\n3. Create an executable CLI at bin/todo (shebang, chmod +x) using argparse with subcommands: add, list, done, stats. Persist tasks to tasks.json in the current directory using the standard json module.\n4. Update README.md with a short usage section showing the commands.\n5. Ensure a minimal .gitignore exists excluding __pycache__/ and *.pyc.\nMake the minimal changes needed and follow the vault documentation conventions before planning.",
+    "status": {"name": "In Progress"},
+    "project": {"key": "DFX5"},
+    "issuetype": {"name": "Task"},
+    "assignee": {"displayName": "Autopilot E2E"},
+    "priority": {"name": "Medium"},
+    "labels": ["cli", "feature"],
+    "created": "2026-08-19T11:00:00.000-0500",
+    "updated": "2026-08-19T11:00:00.000-0500",
+    "comment": {
+      "comments": [
+        {
+          "author": {"displayName": "Product Owner"},
+          "body": "The CLI must work with the standard library only — do not add dependencies. Follow the conventions documented in the vault.",
+          "created": "2026-08-19T11:05:00.000-0500"
+        }
+      ]
+    }
+  }
+}

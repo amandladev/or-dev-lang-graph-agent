@@ -31,11 +31,9 @@ def _make_registry(jira=None, obsidian=None, missing: set[str] = frozenset()) ->
     return registry
 
 
-# ---------------------------------------------------------------------------
 # Property 24: A missing or empty ticket ID short-circuits context building
 # without contacting Jira
 # Validates: Requirements 7.1
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -66,11 +64,9 @@ def test_missing_or_empty_id_short_circuits_without_jira_call(ticket: dict):
     jira.execute.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
 # Property 25: Jira tool outcomes propagate faithfully into
 # _fetch_ticket's return value
 # Validates: Requirements 7.2, 7.3, 7.6
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -145,11 +141,9 @@ def test_jira_registered_but_failing_returns_dict_with_empty_fields(
     assert result["error"] == error_message
 
 
-# ---------------------------------------------------------------------------
 # Property 26: Obsidian notes are reflected in context sources with an
 # accurate count
 # Validates: Requirements 7.4
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -183,10 +177,8 @@ def test_obsidian_success_with_notes_reflected_with_accurate_count(notes: list[d
     assert obsidian_sources[0]["count"] == len(notes)
 
 
-# ---------------------------------------------------------------------------
 # Property 27: A failing Obsidian search always yields an empty note list
 # Validates: Requirements 7.5
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -207,11 +199,9 @@ def test_failing_obsidian_search_yields_empty_note_list(error_message: str):
     assert result == []
 
 
-# ---------------------------------------------------------------------------
 # Property 28: Non-empty description and comments each contribute a
 # distinct source entry
 # Validates: Requirements 7.7
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -246,11 +236,9 @@ def test_description_and_comments_each_contribute_distinct_source_entry(
     assert "jira_comments" in source_types
 
 
-# ---------------------------------------------------------------------------
 # Property 29: Absence of title and labels skips the Obsidian search
 # entirely
 # Validates: Requirements 7.8
-# ---------------------------------------------------------------------------
 
 
 @settings(max_examples=100)
@@ -273,3 +261,29 @@ def test_no_title_no_labels_skips_obsidian_search(description: str):
 
     obsidian.execute.assert_not_called()
     assert output["context"]["related_notes"] == []
+
+
+def test_infer_instance_maps_known_prefixes():
+    """Known project prefixes map to their Jira instance name."""
+    jira = MagicMock()
+    jira.execute.return_value = ToolResult(success=True, data={"id": "DFX5-1"})
+    registry = _make_registry(jira=jira)
+    agent = ContextBuilderAgent(tool_registry=registry)
+
+    agent.execute({"ticket": {"id": "DFX5-1"}})
+
+    _, kwargs = jira.execute.call_args
+    assert kwargs["instance"] == "DFX5"
+
+
+def test_infer_instance_empty_for_unknown_prefix():
+    """Unknown prefixes fall back to the Jira tool's default instance."""
+    jira = MagicMock()
+    jira.execute.return_value = ToolResult(success=True, data={"id": "XYZ-1"})
+    registry = _make_registry(jira=jira)
+    agent = ContextBuilderAgent(tool_registry=registry)
+
+    agent.execute({"ticket": {"id": "XYZ-1"}})
+
+    _, kwargs = jira.execute.call_args
+    assert kwargs["instance"] == ""

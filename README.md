@@ -1,149 +1,165 @@
 # Autopilot
 
-Sistema local de orquestación de flujos de trabajo para desarrolladores. Autopilot coordina agentes especializados y herramientas para automatizar el ciclo completo de desarrollo — desde la toma de tickets hasta la implementación, testing, documentación y publicación.
+Local workflow orchestration system for developers. Autopilot coordinates specialized agents and tools to automate the full development cycle — from fetching tickets to implementation, testing, documentation, and publishing.
 
-Autopilot **no es** un asistente de código. Es un orquestador que coordina herramientas existentes (OpenCode, Jira, Git, etc.) mediante una arquitectura basada en agentes, ejecutándose completamente en macOS sin dependencias de infraestructura cloud.
+Autopilot is **not** a code assistant. It is an orchestrator that coordinates existing tools (OpenCode, Jira, Git, etc.) through an agent-based architecture, running entirely on macOS with no cloud infrastructure dependencies.
 
-## Índice
+## Why
 
+**The problem.** Most of a developer's workflow around the code is repetitive and mechanical: fetch the ticket, gather context, plan, implement, test, commit with the right conventions, publish, document. None of it is hard — but it consumes attention, and skipped steps cause real friction (tickets left without transitions, inconsistent commit messages, runs without evidence).
+
+**The idea.** Autopilot is an orchestrator, not an assistant. It doesn't try to be better at coding than the tools that already exist — instead it coordinates them: OpenCode implements, Jira tracks, git stores, Obsidian remembers. The value Autopilot adds is the plumbing: turning a ticket into a documented, tested, published run — and keeping an audit trail so you can always answer *what happened, when, and why*.
+
+**Why this design.**
+
+- **Agent per step** — each agent has one narrow responsibility, is testable in isolation, and can be swapped or extended without touching the others.
+- **Graph orchestration** — workflows are explicit LangGraph state graphs: readable, resumable (state is persisted after every successful node), and easy to extend with new nodes.
+- **Clean Architecture** — the domain has zero external dependencies; swapping Jira for another tracker, JSON persistence for SQLite, or OpenCode for another runner touches only the infrastructure layer.
+- **Local-first** — everything runs on your machine: no cloud infrastructure, no data leaves your environment.
+
+**Honest trade-offs.** The orchestrator is only as good as its agents: LLM calls dominate latency and results vary run to run. Some integrations are still stubs (git, github, playwright, Jira transitions) — the [Roadmap](#roadmap--whats-left-to-improve) reflects the gaps. The knowledge base starts as keyword-based JSON search — a deliberate first step before investing in a vector store.
+
+## Table of Contents
+
+- [Why](#why)
 - [Quick Start](#quick-start)
-- [Arquitectura](#arquitectura)
-- [Requisitos](#requisitos)
-- [Instalación](#instalación)
-- [Configuración](#configuración)
-- [Uso — Referencia de comandos](#uso)
-- [Agentes](#agentes)
-- [Herramientas](#herramientas)
-- [Persistencia y Auditoría](#persistencia-y-auditoría)
-- [Manejo de errores](#manejo-de-errores)
-- [Solución de problemas](#solución-de-problemas)
+- [Architecture](#architecture)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage — Command reference](#usage)
+- [Agents](#agents)
+- [Tools](#tools)
+- [Persistence & Auditing](#persistence--auditing)
+- [Error handling](#error-handling)
+- [Troubleshooting](#troubleshooting)
 - [Tests](#tests)
-- [Estructura del proyecto](#estructura-del-proyecto)
-- [Roadmap](#roadmap--qué-falta-para-mejorar)
+- [Project structure](#project-structure)
+- [Roadmap](#roadmap--whats-left-to-improve)
 
 ## Quick Start
 
-Para alguien que ya tiene `opencode` instalado y quiere correr su primer ticket:
+For someone who already has `opencode` installed and wants to run their first ticket:
 
 ```bash
-# 1. Instalar autopilot (una sola vez)
+# 1. Install autopilot (one time only)
 cd or-dev-langchain-agent
 pip3 install -e .
 
-# 2. Crear config global (una sola vez)
+# 2. Create global config (one time only)
 cp autopilot/.autopilot.yaml.template ~/.autopilot.yaml
-# Edita ~/.autopilot.yaml: vault_location, llm_model, llm_provider
+# Edit ~/.autopilot.yaml: vault_location, llm_model, llm_provider
 
-# 3. Exportar credenciales de Jira para la instancia del ticket
-#    (el prefijo del ticket define la instancia: PROJ-123 -> JIRA_PROJ_*)
-export JIRA_PROJ_URL="https://tu-dominio.atlassian.net"
-export JIRA_PROJ_EMAIL="tu@email.com"
-export JIRA_PROJ_TOKEN="tu-api-token"
+# 3. Export Jira credentials for the ticket's instance
+#    (the ticket prefix defines the instance: PROJ-123 -> JIRA_PROJ_*)
+export JIRA_PROJ_URL="https://your-domain.atlassian.net"
+export JIRA_PROJ_EMAIL="you@email.com"
+export JIRA_PROJ_TOKEN="your-api-token"
 
-# 4. Pararte en el repo del proyecto que quieres modificar
-cd /ruta/a/tu/proyecto
+# 4. Move to the repo of the project you want to modify
+cd /path/to/your/project
 
-# 5. Correr en dry-run primero para validar el entorno sin tocar nada
+# 5. Run in dry-run first to validate the environment without touching anything
 autopilot work PROJ-123 --dry-run
 
-# 6. Si todo se ve bien, correr en modo real
+# 6. If everything looks good, run in real mode
 autopilot work PROJ-123
 ```
 
-Si algo falla en el paso 5/6, revisa [Solución de problemas](#solución-de-problemas) —
-`autopilot work` valida el entorno antes de arrancar y explica qué falta.
+If something fails in step 5/6, check [Troubleshooting](#troubleshooting) —
+`autopilot work` validates the environment before starting and explains what's missing.
 
-## Arquitectura
+## Architecture
 
-El proyecto sigue principios de **Clean Architecture** con tres capas bien definidas:
+The project follows **Clean Architecture** principles with three well-defined layers:
 
 ```
 autopilot/
-├── domain/          # Entidades, value objects e interfaces (sin dependencias externas)
-├── application/     # Casos de uso, orquestador y registros
-├── infrastructure/  # Implementaciones concretas: agentes, herramientas, adaptadores, persistencia
-├── cli/             # Interfaz de línea de comandos (Click)
-└── .autopilot.yaml.template  # Plantilla de configuración
+├── domain/          # Entities, value objects and interfaces (no external dependencies)
+├── application/     # Use cases, orchestrator and records
+├── infrastructure/  # Concrete implementations: agents, tools, adapters, persistence
+├── cli/             # Command line interface (Click)
+└── .autopilot.yaml.template  # Configuration template
 ```
 
-**Motor de orquestación:** LangGraph StateGraph — modela los workflows como grafos dirigidos donde cada nodo es un agente especializado.
+**Orchestration engine:** LangGraph StateGraph — models workflows as directed graphs where each node is a specialized agent.
 
-**Patrón de inyección:** Constructor injection, cableado en un módulo bootstrap centralizado.
+**Injection pattern:** Constructor injection, wired in a centralized bootstrap module.
 
-**Flujo de datos:** Un objeto `WorkflowState` compartido fluye a través del grafo, acumulando datos conforme cada agente contribuye su salida.
+**Data flow:** A shared `WorkflowState` object flows through the graph, accumulating data as each agent contributes its output.
 
-**Auditoría:** Run Records + Ledger para tracking completo de ejecuciones con persistencia en git.
+**Auditing:** Run Records + Ledger for full execution tracking with git persistence.
 
-### Grafo de trabajo
+### Work graph
 
 ```
 START → Context_Builder → Planner → Code_Executor → Tester → Publisher → Documentation_Agent → END
                                                         ↑                |
-                                                        └── retry ───────┘ (si error retryable)
+                                                        └── retry ───────┘ (if retryable error)
 ```
 
-## Requisitos
+## Requirements
 
 - Python 3.11+
-- macOS (diseñado para ejecución local)
-- [OpenCode](https://github.com/opencode-ai/opencode) instalado y configurado
+- macOS (designed for local execution)
+- [OpenCode](https://github.com/opencode-ai/opencode) installed and configured
 
-## Instalación
+## Installation
 
 ```bash
-# Clonar el repositorio
+# Clone the repository
 git clone <repo-url>
 cd or-dev-langchain-agent
 
-# Instalar globalmente (recomendado)
+# Install globally (recommended)
 pip3 install -e .
 
-# O instalar en modo desarrollo
+# Or install in development mode
 pip install -e ".[dev]"
 ```
 
-Después de instalar, el comando `autopilot` estará disponible globalmente.
+After installing, the `autopilot` command will be available globally.
 
-## Configuración
+## Configuration
 
-### Config global (una sola vez)
+### Global config (one time only)
 
 ```bash
 cp autopilot/.autopilot.yaml.template ~/.autopilot.yaml
 ```
 
-Edita `~/.autopilot.yaml`:
+Edit `~/.autopilot.yaml`:
 
 ```yaml
-vault_location: "/Users/tu-usuario/ruta/a/tu/vault"
+vault_location: "/Users/your-user/path/to/your/vault"
 llm_model: "anthropic/claude-sonnet-4-20250514"
 llm_provider: "anthropic"
 ```
 
-**Nota:** `workspace_location` se auto-detecta del directorio donde ejecutas `autopilot`. No es necesario configurarlo.
+**Note:** `workspace_location` is auto-detected from the directory where you run `autopilot`. There is no need to configure it. Each live ticket gets a deterministic Git worktree under `worktree_root` (or a sibling `.autopilot-worktrees` directory).
 
-El loader busca config en este orden:
-1. `.autopilot.yaml` en el directorio actual (override por proyecto)
-2. `~/.autopilot.yaml` en tu home (config global)
+The loader looks for config in this order:
+1. `.autopilot.yaml` in the current directory (per-project override)
+2. `~/.autopilot.yaml` in your home (global config)
 
-### Variables de entorno — Jira
+### Environment variables — Jira
 
 ```bash
-# Una instancia por cada proyecto/dominio
-export JIRA_PROJ_URL="https://tu-dominio.atlassian.net"
-export JIRA_PROJ_EMAIL="tu@email.com"
-export JIRA_PROJ_TOKEN="tu-api-token"
+# One instance per project/domain
+export JIRA_PROJ_URL="https://your-domain.atlassian.net"
+export JIRA_PROJ_EMAIL="you@email.com"
+export JIRA_PROJ_TOKEN="your-api-token"
 
-export JIRA_ACME_URL="https://otro-dominio.atlassian.net"
-export JIRA_ACME_EMAIL="tu@email.com"
-export JIRA_ACME_TOKEN="otro-token"
+export JIRA_ACME_URL="https://another-domain.atlassian.net"
+export JIRA_ACME_EMAIL="you@email.com"
+export JIRA_ACME_TOKEN="another-token"
 ```
 
-La instancia se infiere automáticamente del prefijo del ticket (PROJ-123 → JIRA_PROJ_*).
+The instance is inferred automatically from the ticket prefix (PROJ-123 → JIRA_PROJ_*).
 
-### Reglas de workflow (vault)
+### Workflow rules (vault)
 
-Crea `.autopilot-rules.md` en la raíz de tu vault de Obsidian:
+Create `.autopilot-rules.md` at the root of your Obsidian vault:
 
 ```markdown
 # Workflow Rules
@@ -155,17 +171,17 @@ Crea `.autopilot-rules.md` en la raíz de tu vault de Obsidian:
 - push_remote: origin
 ```
 
-Si no existe este archivo, se usan reglas por defecto. También busca reglas en notas sueltas como fallback.
+If this file does not exist, default rules are used. It also looks for rules in loose notes as a fallback.
 
-**Nota:** `jira_transition` se lee y se refleja en las métricas del run (`metrics.jira_update`),
-pero el Publisher **todavía no llama la API de Jira** para aplicar la transición ni postear
-comentarios — `_update_jira` reporta `{"skipped": true}` de forma explícita. Usa
-`autopilot ledger`/el run record para confirmar el estado real; no asumas que el ticket
-cambió de status solo porque configuraste la regla.
+**Note:** `jira_transition` is read and reflected in the run metrics (`metrics.jira_update`),
+but the Publisher **does not call the Jira API yet** to apply the transition or post
+comments — `_update_jira` explicitly reports `{"skipped": true}`. Use
+`autopilot ledger`/the run record to confirm the real state; do not assume the ticket
+changed status just because you configured the rule.
 
-### Override por variable de entorno
+### Environment variable override
 
-Todos los campos del config soportan override:
+All config fields support override:
 
 ```bash
 export AUTOPILOT_TIMEOUT_SECONDS=120
@@ -173,188 +189,208 @@ export AUTOPILOT_MAX_RETRIES=5
 export AUTOPILOT_VERBOSITY=verbose
 ```
 
-## Uso
+## Usage
 
 ```bash
-# Desde cualquier directorio de proyecto
-cd /tu/proyecto
+# From any project directory
+cd /your/project
 
-# Ejecutar workflow completo para un ticket
+# Run the full workflow for a ticket
 autopilot work PROJ-123
 
-# Ejecutar en modo dry-run (sin cambios reales)
+# Resume a ticket in its existing worktree
+autopilot resume --ticket PROJ-123
+
+# Run in dry-run mode (no real changes)
 autopilot work PROJ-123 --dry-run
 
-# Ver la configuración cargada
+# View the loaded configuration
 autopilot config
 
-# Resumir un workflow pausado o fallido
+# Resume a paused or failed workflow
 autopilot resume
 
-# Ver el ledger de ejecuciones
+# View the execution ledger
 autopilot ledger
 
-# Ver ejecuciones de un ticket específico
+# View executions for a specific ticket
 autopilot ledger --ticket PROJ-123
 
-# Ver estado (stub)
+# View status (stub)
 autopilot status
 
 # Review workflow (stub)
 autopilot review
 ```
 
-### Referencia de comandos y flags
+### Command and flag reference
 
-| Comando | Flags | Descripción |
+| Command | Flags | Description |
 |---------|-------|-------------|
-| `autopilot work TICKET_ID` | `--dry-run` · `--skip-validation` · `--config-path` | Ejecuta el workflow completo (Context_Builder → Planner → Code_Executor → Tester → Publisher → Documentation_Agent) para `TICKET_ID`. Valida config y entorno antes de arrancar salvo `--skip-validation`. `--dry-run` no hace commits/push reales. |
-| `autopilot resume` | `--config-path` | Reanuda el último workflow pausado o fallido desde el último nodo completado con éxito (usa `.autopilot_state.json`). |
-| `autopilot config` | `--config-path` | Imprime en YAML la configuración efectiva (tras merge de defaults + archivo + env vars). Útil para depurar qué config se está usando realmente. |
-| `autopilot ledger` | `--ticket TICKET_ID` · `--limit N` · `--config-path` | Muestra el resumen del ledger de auditoría. Con `--ticket` filtra por ticket; `--limit` acota cuántas entradas se listan (las estadísticas totales siempre son sobre el ledger completo). |
-| `autopilot status` | — | Stub — todavía no implementado. |
-| `autopilot review` | — | Stub — todavía no implementado. |
+| `autopilot work TICKET_ID` | `--dry-run` · `--skip-validation` · `--config-path` | Runs the full workflow (Context_Builder → Planner → Code_Executor → Tester → Publisher → Documentation_Agent) for `TICKET_ID`. Validates config and environment before starting unless `--skip-validation` is passed. `--dry-run` does not make real commits/pushes. |
+| `autopilot resume` | `--config-path` · `--ticket TICKET_ID` · `--answer "..."` | Resumes a paused or failed workflow from its existing ticket worktree; without `--ticket`, keeps the legacy current-workspace behavior. If the run is `BLOCKED` on a clarification question, `--answer` is required — it resumes the same node that asked, with the answer injected into context. |
+| `autopilot config` | `--config-path` | Prints the effective configuration as YAML (after merging defaults + file + env vars). Useful for debugging which config is actually in use. |
+| `autopilot ledger` | `--ticket TICKET_ID` · `--limit N` · `--config-path` | Shows the audit ledger summary. With `--ticket` filters by ticket; `--limit` caps how many entries are listed (total statistics always cover the full ledger). |
+| `autopilot status` | — | Stub — not implemented yet. |
+| `autopilot review` | — | Stub — not implemented yet. |
 
-`--config-path` (default `auto`) acepta una ruta explícita a un `.autopilot.yaml`; si se omite, se
-autodescubre siguiendo el orden descrito en [Configuración](#configuración).
+`--config-path` (default `auto`) accepts an explicit path to a `.autopilot.yaml`; if omitted, it is
+auto-discovered following the order described in [Configuration](#configuration).
 
-## Agentes
+### Concurrent tickets
 
-| Agente | Qué hace |
+The Python application API can run independent tickets concurrently:
+
+```python
+app.run_many(["WPD-619", "WPD-620", "WPD-621"], approve=True)
+```
+
+Every ticket receives its own branch, filesystem path, Git index and OpenCode session. A dirty worktree is preserved during cleanup and is never removed implicitly.
+
+Planner output also records approximate `expected_files`, `affected_modules` and `depends_on` values. Use `app.analyze_plans(...)` to decide whether tickets can run in parallel or need review/sequencing; overlap detection is advisory and does not block execution automatically.
+
+## Agents
+
+| Agent | What it does |
 |--------|----------|
-| **Context_Builder** | Fetch ticket de Jira + busca notas relevantes en vault Obsidian |
-| **Planner** | Envía contexto a OpenCode y genera un plan de implementación estructurado |
-| **Code_Executor** | Ejecuta cada paso del plan via `opencode run` |
-| **Tester** | Detecta tipo de proyecto (Node/Python) y ejecuta tests automáticamente |
-| **Publisher** | Lee reglas del vault, crea rama, commit, push según convenciones del proyecto |
-| **Documentation_Agent** | Genera resumen markdown del trabajo realizado |
-| **Reviewer** | Workflow de revisión de código (pendiente) |
+| **Context_Builder** | Fetches the Jira ticket + searches for relevant notes in the Obsidian vault |
+| **Planner** | Sends context to OpenCode and generates a structured implementation plan |
+| **Code_Executor** | Executes each plan step via `opencode run` |
+| **Tester** | Detects the project type (Node/Python) and runs tests automatically |
+| **Publisher** | Validates the ticket worktree, then commits and pushes its branch according to project conventions |
+| **Documentation_Agent** | Generates a markdown summary of the work done |
+| **Reviewer** | Code review workflow (pending) |
 
-## Herramientas
+## Tools
 
-| Herramienta | Descripción |
+| Tool | Description |
 |-------------|-------------|
-| **opencode** | Ejecuta prompts via `opencode run` (modo batch) |
-| **jira** | REST API v2/v3 de Atlassian — fetch, transitions, comments, subtasks, JQL search |
-| **obsidian** | Búsqueda por keywords en vault local (scoring por relevancia) |
-| **filesystem** | Operaciones de lectura/escritura/listado de archivos |
-| git | Operaciones Git via subprocess (stub — Publisher lo hace directo) |
-| github | Interacción con GitHub API (pendiente) |
-| playwright | Automatización de navegador (pendiente) |
+| **opencode** | Runs prompts via `opencode run` (batch mode) |
+| **jira** | Atlassian REST API v2/v3 — fetch, transitions, comments, subtasks, JQL search |
+| **obsidian** | Keyword search in local vault (relevance scoring) |
+| **filesystem** | File read/write/list operations |
+| git | Git operations via subprocess (stub — Publisher does it directly) |
+| github | GitHub API interaction (pending) |
+| playwright | Browser automation (pending) |
 
-### Jira Tool — Acciones disponibles
+### Jira Tool — Available actions
 
-| Acción | Descripción |
+| Action | Description |
 |--------|-------------|
-| `get_ticket` | Obtener detalles del ticket (resumen, descripción, estado, labels, comments) |
-| `get_transitions` | Listar transiciones disponibles para el ticket |
-| `apply_transition` | Aplicar una transición por nombre (case-insensitive) |
-| `comment` | Postear un comment (auto-convierte Markdown a wiki markup) |
-| `create_subtask` | Crear un sub-task bajo un ticket padre |
-| `search_jql` | Buscar issues usando JQL |
-| `status_entered_at` | Obtener timestamp de la última entrada a un status (para idempotencia) |
+| `get_ticket` | Get ticket details (summary, description, status, labels, comments) |
+| `get_transitions` | List available transitions for the ticket |
+| `apply_transition` | Apply a transition by name (case-insensitive) |
+| `comment` | Post a comment (auto-converts Markdown to wiki markup) |
+| `create_subtask` | Create a sub-task under a parent ticket |
+| `search_jql` | Search issues using JQL |
+| `status_entered_at` | Get the timestamp of the last entry to a status (for idempotency) |
 
-## Persistencia y Auditoría
+## Persistence & Auditing
 
 ### Run Records
 
-Cada ejecución produce un **RunRecord** que captura el ciclo completo:
+Each execution produces a **RunRecord** that captures the full cycle:
 
-- **Identidad:** run_id, ticket_id, ticket_title
-- **Temporal:** started_at, finished_at, duration_seconds
-- **Resultado:** status (running/completed/failed/cancelled), verdict (PASS/FAIL/BLOCKED)
-- **Contenido:** plan ejecutado, archivos modificados, tests (executed/passed/failed)
-- **Auditoría:** logs, errors, evidence, tokens_used, cost_usd
+- **Identity:** run_id, ticket_id, ticket_title
+- **Time:** started_at, finished_at, duration_seconds
+- **Result:** status (running/completed/failed/cancelled), verdict (PASS/FAIL/BLOCKED)
+- **Content:** executed plan, modified files, tests (executed/passed/failed)
+- **Audit:** logs, errors, evidence, tokens_used, cost_usd
 
-**Nota:** `tokens_used`/`cost_usd` están en el schema para una futura integración,
-pero ningún agente/tool actual reporta uso de tokens u costo de vuelta al engine —
-en la práctica siempre quedan en `null`. No los uses como fuente real de costos todavía.
+**Note:** `tokens_used`/`cost_usd` are in the schema for a future integration,
+but no current agent/tool reports token usage or cost back to the engine —
+in practice they always remain `null`. Do not use them as a real cost source yet.
 
-Ubicación: `{workspace}/runs/{run_id}/run-record.json`
+Location: `{workspace}/runs/{run_id}/run-record.json` for the repository-level run record; the resumable `.autopilot_state.json` lives inside the ticket's worktree.
 
 ### Ledger
 
-El **Ledger** es el registro central de auditoría. Cada ejecución agrega una entrada:
+The **Ledger** is the central audit record. Each execution adds an entry:
 
-- Idempotente por run_id (re-ejecutar reemplaza la entrada)
-- Summary Markdown offline sin necesidad de Jira
-- Historial por ticket
+- Idempotent by run_id (re-running replaces the entry)
+- Offline Markdown summary without needing Jira
+- History by ticket
 
-Ubicación: `{workspace}/ledger.json`
+Location: `{workspace}/ledger.json`
 
 ### Git Persistence
 
-El ledger se commitea a una branch dedicada `autopilot-results` para:
+The ledger is committed to a dedicated `autopilot-results` branch for:
 
-- Historial de versiones de todas las ejecuciones
-- Diff entre runs
-- Acceso offline a datos históricos
-- Patrón single-writer para concurrencia
+- Version history of all executions
+- Diff between runs
+- Offline access to historical data
+- Single-writer pattern for concurrency
 
-### Detección automática de tests
+Concurrency is also enforced at the process level: a per-workspace **run lock**
+prevents two workflows from running at once in the same workspace, and ledger/run
+record writes are **atomic** (`infrastructure/persistence/file_lock.py`, `atomic_write.py`).
 
-El Tester detecta el framework según los archivos del proyecto:
+### Automatic test detection
 
-| Archivo encontrado | Framework | Comando |
+The Tester detects the framework based on the project files:
+
+| File found | Framework | Command |
 |---|---|---|
-| `package.json` con jest | Jest | `npm test` |
-| `package.json` con mocha | Mocha | `npm test` |
-| `package.json` con vitest | Vitest | `npx vitest run` |
+| `package.json` with jest | Jest | `npm test` |
+| `package.json` with mocha | Mocha | `npm test` |
+| `package.json` with vitest | Vitest | `npx vitest run` |
 | `pyproject.toml` | Pytest | `python3 -m pytest --tb=short` |
-| `Makefile` con target test | Make | `make test` |
+| `Makefile` with test target | Make | `make test` |
 
-## Manejo de errores
+## Error handling
 
-- **Errores retryables** (timeout, red, tests fallidos): reintentos automáticos con backoff exponencial
-- **Errores no retryables** (autenticación, configuración, schema): pausa inmediata del workflow
-- El estado se persiste después de cada nodo exitoso para permitir resumir con `autopilot resume`
+- **Retryable errors** (timeout, network, failed tests): automatic retries with exponential backoff
+- **Non-retryable errors** (authentication, configuration, schema): immediate workflow pause
+- **Clarification needed**: when Planner determines a ticket is genuinely ambiguous (it would let OpenCode produce two materially different, equally "valid" implementations), it stops and asks a specific question instead of guessing. The run pauses with status `blocked` and verdict `BLOCKED` — no retry, since the question won't answer itself — and the question is shown in the workflow report. Answer it with `autopilot resume --ticket TICKET_ID --answer "..."`, which resumes Planner itself (not the next node) with the answer folded into its prompt.
+- State is persisted after each successful node to allow resuming with `autopilot resume`
 
-## Solución de problemas
+## Troubleshooting
 
-Mensajes comunes al correr `autopilot work`/`resume`/`config`/`ledger` y cómo resolverlos:
+Common messages when running `autopilot work`/`resume`/`config`/`ledger` and how to resolve them:
 
-| Mensaje / síntoma | Causa | Solución |
+| Message / symptom | Cause | Solution |
 |---|---|---|
-| `workspace_location must not be empty` / `vault_location must not be empty` | El config no tiene esos campos completos (`config_sanity_validator`, corre antes que nada) | Completa `vault_location` en `~/.autopilot.yaml`. `workspace_location` se auto-detecta del CWD; no lo dejes vacío a mano si lo overrideaste. |
-| `workspace_location is not creatable: ...` | La ruta configurada no existe y ninguna carpeta ancestro es escribible | Usa una ruta bajo un directorio con permisos de escritura, o crea el directorio manualmente. |
-| `opencode not found in PATH` | El binario `opencode` no está instalado o no está en el `PATH` | Instala [OpenCode](https://github.com/opencode-ai/opencode) y verifica con `which opencode`. |
-| `Vault directory not found: ...` | `vault_location` apunta a una carpeta que no existe | Corrige la ruta en `~/.autopilot.yaml` (debe ser la raíz de tu vault de Obsidian). |
-| `Jira credentials incomplete for instance 'X'` (warning) | Faltan `JIRA_X_URL` / `JIRA_X_EMAIL` / `JIRA_X_TOKEN` para el prefijo del ticket (ej. `PROJ-123` → instancia `PROJ`) | Exporta las tres variables de entorno para esa instancia. Sin ellas, Context_Builder simplemente omite el fetch de Jira (no bloquea el run). |
-| El comando corre pero nunca crea/pushea una rama | Estás corriendo `--dry-run`, o `.autopilot-rules.md` no define reglas válidas | Quita `--dry-run` para un run real; revisa que `.autopilot-rules.md` exista en la raíz del vault con el formato esperado (ver [Reglas de workflow](#reglas-de-workflow-vault)). |
-| El ticket no cambia de status en Jira aunque configuré `jira_transition` | Publisher todavía no implementa la llamada real a la API de Jira para transitions | Comportamiento esperado por ahora — ver la nota en [Reglas de workflow](#reglas-de-workflow-vault) y el roadmap. Aplica la transición manualmente en Jira. |
-| `Not a git repository, skipping ledger commit` (log) | El `workspace_location` no es un repo git | No es un error bloqueante: el ledger sigue guardándose en `ledger.json`, solo se salta el commit a `autopilot-results`. Inicializa un repo git ahí si quieres ese historial versionado. |
-| `autopilot resume` falla con `State file not found: ...` | No existe `.autopilot_state.json` en el workspace (ningún run previo persistió estado) | Corre `autopilot work TICKET_ID` primero; `resume` solo aplica a workflows que fallaron o se pausaron a mitad de camino. |
-| Cambié `~/.autopilot.yaml` pero no veo el efecto | Existe un `.autopilot.yaml` en el directorio del proyecto (override local) que tiene prioridad | Revisa `autopilot config` para ver qué archivo se cargó realmente, o borra/ajusta el override local. |
+| `workspace_location must not be empty` / `vault_location must not be empty` | The config does not have those fields filled in (`config_sanity_validator`, runs before anything else) | Fill in `vault_location` in `~/.autopilot.yaml`. `workspace_location` is auto-detected from the CWD; do not leave it empty manually if you overrode it. |
+| `workspace_location is not creatable: ...` | The configured path does not exist and no ancestor folder is writable | Use a path under a directory with write permissions, or create the directory manually. |
+| `opencode not found in PATH` | The `opencode` binary is not installed or not in the `PATH` | Install [OpenCode](https://github.com/opencode-ai/opencode) and verify with `which opencode`. |
+| `Vault directory not found: ...` | `vault_location` points to a folder that does not exist | Fix the path in `~/.autopilot.yaml` (it must be the root of your Obsidian vault). |
+| `Jira credentials incomplete for instance 'X'` (warning) | `JIRA_X_URL` / `JIRA_X_EMAIL` / `JIRA_X_TOKEN` are missing for the ticket prefix (e.g. `PROJ-123` → instance `PROJ`) | Export the three environment variables for that instance. Without them, Context_Builder simply skips the Jira fetch (it does not block the run). |
+| The command runs but never creates/pushes a branch | You are running `--dry-run`, or `.autopilot-rules.md` does not define valid rules | Remove `--dry-run` for a real run; check that `.autopilot-rules.md` exists at the vault root with the expected format (see [Workflow rules](#workflow-rules-vault)). |
+| The ticket status does not change in Jira even though I configured `jira_transition` | Publisher does not implement the real Jira API call for transitions yet | Expected behavior for now — see the note in [Workflow rules](#workflow-rules-vault) and the roadmap. Apply the transition manually in Jira. |
+| `Not a git repository, skipping ledger commit` (log) | The `workspace_location` is not a git repo | Not a blocking error: the ledger is still saved in `ledger.json`, only the commit to `autopilot-results` is skipped. Initialize a git repo there if you want that versioned history. |
+| `autopilot resume` fails with `State file not found: ...` | There is no `.autopilot_state.json` in the workspace (no previous run persisted state) | Run `autopilot work TICKET_ID` first; `resume` only applies to workflows that failed or paused midway. |
+| I changed `~/.autopilot.yaml` but I don't see the effect | There is a `.autopilot.yaml` in the project directory (local override) that takes priority | Check `autopilot config` to see which file was actually loaded, or delete/adjust the local override. |
 
-Si el mensaje no está en esta tabla, corre con `--config-path` explícito y sin `--skip-validation`
-para obtener el diagnóstico más detallado posible antes de reportarlo.
+If the message is not in this table, run with an explicit `--config-path` and without `--skip-validation`
+to get the most detailed diagnosis possible before reporting it.
 
 ## Tests
 
 ```bash
-# Ejecutar toda la suite
+# Run the whole suite
 python3 -m pytest
 
-# Con output verbose
+# With verbose output
 python3 -m pytest -v
 
-# Solo tests de un componente
+# Only one component's tests
 python3 -m pytest tests/test_jira_markdown.py -v
 python3 -m pytest tests/test_run_record.py -v
 python3 -m pytest tests/test_ledger.py -v
 ```
 
-Suite: **319 tests** (property tests + unit + integración).
+The suite includes property, unit, and integration tests.
 
-## Estructura del proyecto
+## Project structure
 
 ```
 autopilot/
 ├── __init__.py
 ├── __main__.py                    # Entry point: python -m autopilot
-├── .autopilot.yaml.template       # Plantilla de configuración
+├── .autopilot.yaml.template       # Configuration template
 ├── cli/
-│   └── commands.py                # Comandos CLI (Click)
+│   └── commands.py                # CLI commands (Click)
 ├── domain/
 │   ├── entities/                  # WorkflowState, Ticket, Plan, Config, RunRecord, LedgerEntry
 │   ├── value_objects/             # ErrorRecord, LogEntry, EvidenceItem, Metrics, Exceptions
@@ -370,39 +406,40 @@ autopilot/
     ├── adapters/                  # JSONSerializer, YAMLConfigLoader, StructuredLogger
     ├── knowledge/                 # JsonKnowledgeEngine
     ├── persistence/               # RunRecordStore, Ledger, LedgerCommitter
-    └── bootstrap.py               # Cableado de dependencias (DI)
+    └── bootstrap.py               # Dependency wiring (DI)
 ```
 
-## Roadmap — Qué falta para mejorar
+## Roadmap — What's left to improve
 
-### Ya implementado (verificado en código, no en el roadmap original)
+### Already implemented (verified in code, not in the original roadmap)
 
-- [x] **Sesiones de OpenCode**: `OpenCodeTool` usa `--continue` para mantener contexto entre pasos (`opencode_tool.py`)
-- [x] **Logging real en terminal**: `StructuredLogger` está conectado a `OrchestrationEngine` (`log_agent_start`/`log_agent_completion`/`log_retry`)
-- [x] **Output del workflow más detallado**: `autopilot work` imprime un reporte con archivos modificados, tests, errores y evidencia (`cli/commands.py`)
-- [x] **Workspace detection**: `workspace_location` se auto-detecta del CWD en `yaml_config_loader.py` (override vía `AUTOPILOT_WORKSPACE_LOCATION`)
+- [x] **OpenCode sessions**: `OpenCodeTool` uses `--continue` to keep context between steps (`opencode_tool.py`)
+- [x] **Real terminal logging**: `StructuredLogger` is connected to `OrchestrationEngine` (`log_agent_start`/`log_agent_completion`/`log_retry`)
+- [x] **More detailed workflow output**: `autopilot work` prints a report with modified files, tests, errors and evidence (`cli/commands.py`)
+- [x] **Workspace detection**: `workspace_location` is auto-detected from the CWD in `yaml_config_loader.py` (override via `AUTOPILOT_WORKSPACE_LOCATION`)
+- [x] **Pre-execution validation**: `validate_environment` checks opencode/git availability, vault and workspace paths, and Jira credentials; `config_sanity_validator` runs first in every command (`infrastructure/validators.py`)
+- [x] **Knowledge base (Memory/RAG MVP)**: each run is stored as an `Experience` via `ExperienceBuilder` + `JsonKnowledgeEngine`; the Planner queries similar past experiences and includes them in its planning prompt (`application/knowledge/`, `infrastructure/knowledge/`)
 
-### Prioridad Alta
+### High priority
 
-- [ ] **Validación pre-ejecución**: Verificar que opencode, git, y las credenciales están disponibles antes de iniciar (parcial: `validate_environment`/`config_sanity_validator` ya corren antes de `work`/`resume`/`config`/`ledger`, falta cubrir disponibilidad real del binario `opencode`)
-- [ ] **Jira transition real**: Publisher lee `jira_transition` pero no llama la API de Jira todavía (`_update_jira` siempre reporta `skipped`) — ver nota en "Reglas de workflow"
+- [ ] **Real Jira transition**: Publisher reads `jira_transition` but does not call the Jira API yet (`_update_jira` always reports `skipped`) — see the note in "Workflow rules"
 
-### Prioridad Media
+### Medium priority
 
-- [ ] **PR automático**: Publisher crea un PR en GitHub/GitLab después del push
-- [ ] **Reviewer agent**: Análisis de código pre-merge via OpenCode (agente y comando `review` son stubs conectados pero sin implementar; ver `ReviewCommand`/`build_review_graph`)
-- [ ] **Playwright tests**: Integrar tests E2E para proyectos con frontend
-- [ ] **Multiple config merge**: Config global + config por proyecto (override específico)
-- [ ] **Failure diagnostics**: Usar LLM para generar diagnósticos de fallos para operadores
+- [ ] **Automatic PR**: Publisher creates a PR in GitHub/GitLab after the push
+- [ ] **Reviewer agent**: Pre-merge code analysis via OpenCode (agent and `review` command are connected stubs but not implemented; see `ReviewCommand`/`build_review_graph`)
+- [ ] **Playwright tests**: Integrate E2E tests for projects with frontend
+- [ ] **Multiple config merge**: Global config + per-project config (specific override)
+- [ ] **Failure diagnostics**: Use an LLM to generate failure diagnostics for operators
 
-### Prioridad Baja
+### Low priority
 
-- [ ] **Memory/RAG**: Usar ejecuciones anteriores como contexto para mejorar planes futuros
-- [ ] **Parallel execution**: Ejecutar pasos independientes del plan en paralelo
-- [ ] **Web UI**: Dashboard para ver estado de workflows activos
-- [ ] **Plugin system**: Permitir agregar agentes y herramientas custom sin modificar el core
-- [ ] **Métricas y analytics**: Tiempo por agente, tasa de éxito, tokens consumidos
+- [x] **Ticket isolation**: Run multiple tickets concurrently in independent Git worktrees
+- [ ] **Parallel execution**: Run independent plan steps in parallel
+- [ ] **Web UI**: Dashboard to view the status of active workflows
+- [ ] **Plugin system**: Allow adding custom agents and tools without modifying the core
+- [ ] **Metrics and analytics**: Time per agent, success rate, tokens consumed
 
-## Licencia
+## License
 
-Proyecto privado. Ver [LICENSE](LICENSE).
+Private project. See [LICENSE](LICENSE).

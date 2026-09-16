@@ -65,11 +65,11 @@ class DocumentationAgent:
         evidence = state.get("evidence", [])
         modified_files = state.get("modified_files", [])
 
-        # Build summary
         summary = self._build_summary(plan, evidence, modified_files)
 
         return {
             "metadata": {
+                **(memory_context or {}),
                 "documentation_draft": summary,
                 "documentation_status": "generated",
             }
