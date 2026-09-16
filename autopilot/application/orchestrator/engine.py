@@ -1,5 +1,6 @@
 """LangGraph orchestration engine and state schema."""
 
+import re
 import time
 from typing import Annotated, Any, TypedDict
 
@@ -249,6 +250,37 @@ class OrchestrationEngine:
 
         return node
 
+    _PYTEST_SUMMARY_RE = re.compile(
+        r"={1,}\s*(?:.*\s)?(?P<passed>\d+) passed"
+        r"(?:.*?(?P<failed>\d+) failed)?"
+        r"(?:.*?(?P<errors>\d+) error)?",
+    )
+
+    @classmethod
+    def _parse_test_counts(cls, final_test: dict | None) -> tuple[int, int]:
+        """Extract real test case counts from the pytest summary line.
+
+        Falls back to (0, 0) when the framework output has no parsable
+        summary, so the caller can apply its suite-level default.
+
+        Args:
+            final_test: The last "test_result" evidence entry, if any.
+
+        Returns:
+            Tuple of (tests_executed, tests_passed) per test case.
+        """
+        if not final_test:
+            return 0, 0
+        output = final_test.get("data", {}).get("output", "")
+        if not isinstance(output, str) or not output:
+            return 0, 0
+        match = cls._PYTEST_SUMMARY_RE.search(output)
+        if not match:
+            return 0, 0
+        passed = int(match.group("passed"))
+        failed = int(match.group("failed") or 0) + int(match.group("errors") or 0)
+        return passed + failed, passed
+
     def _log_agent_event(
         self, agent_name: str, input_data: dict[str, Any], operation: str, status: str
     ) -> None:
@@ -294,8 +326,10 @@ class OrchestrationEngine:
                             final_test_status = "passed"
                         elif legacy_result.startswith("FAIL"):
                             final_test_status = "failed"
-                tests_executed = 1 if final_test else 0
-                tests_passed = 1 if final_test_status == "passed" else 0
+                tests_executed, tests_passed = self._parse_test_counts(final_test)
+                if tests_executed == 0 and final_test:
+                    tests_executed = 1
+                    tests_passed = 1 if final_test_status == "passed" else 0
 
                 run_record.update_test_counts(
                     executed=tests_executed,

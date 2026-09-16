@@ -159,5 +159,4 @@ python3 -m pytest tests/test_run_record.py  # Specific test module
 
 - `git_tool.py`, `github_tool.py`, and `playwright_tool.py` are stubs
 - `ReviewerAgent`, `status`, and `review` are stubs
-- Publisher reads `jira_transition` but does not call the Jira API
 - LedgerCommitter silently skips commits when the workspace is not a Git repository

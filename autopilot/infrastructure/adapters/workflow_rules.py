@@ -54,6 +54,10 @@ class WorkflowRulesProvider:
                 rules["jira_transition"] = value
             elif key in ("push_remote", "remote"):
                 rules["push_remote"] = value
+            elif key in ("create_pr", "open_pr"):
+                rules["create_pr"] = value.strip().lower() in ("true", "yes", "1", "y", "on")
+            elif key in ("pr_base", "pull_request_base"):
+                rules["pr_base"] = value
         return rules
 
     def defaults(self) -> dict[str, Any]:
@@ -65,4 +69,6 @@ class WorkflowRulesProvider:
             "commit_pattern": "feat({ticket_id}): {description}",
             "jira_transition": "",
             "push_remote": "origin",
+            "create_pr": False,
+            "pr_base": "",
         }

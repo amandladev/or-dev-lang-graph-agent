@@ -224,7 +224,7 @@ grep -q "GET.*/rest/api/3/issue/$TICKET" "$JIRA_LOG" \
   || fail "fake Jira server never received the story fetch (agent did not read the story)"
 ok "story fetched from simulated Jira"
 
-RUN_RECORD=$(ls "$REPO_PATH"/runs/*/run-record.json 2>/dev/null | head -1)
+RUN_RECORD=$(ls -dt "$REPO_PATH"/runs/*/run-record.json 2>/dev/null | head -1)
 [ -n "$RUN_RECORD" ] || fail "run record not found under $REPO_PATH/runs/"
 
 python3 - "$RUN_RECORD" <<'PY'

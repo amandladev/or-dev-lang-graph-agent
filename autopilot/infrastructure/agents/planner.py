@@ -248,8 +248,10 @@ redoing the work), respond with EXACTLY ONE line and nothing else:
 Prefer making a reasonable, stated assumption and producing a real plan
 whenever you can — only ask if you truly cannot proceed safely.
 
-Otherwise, respond with a clear implementation plan as a numbered list of steps.
-Each step should describe:
+Otherwise, respond with a clear implementation plan as a numbered list of
+steps. Use strictly this format — every step starts on its own line with
+the plain number and a period (e.g. `1. ` / `2. `), no markdown headers
+like `**Step 1**`, no sub-numbering:
 1. What to do (specific file changes)
 2. Why (the reasoning)
 3. Which repository-relative files and modules are expected to change
@@ -273,15 +275,22 @@ handles branching, committing and pushing automatically after implementation.
         Returns:
             Plan dict with steps list.
         """
-        # Split response into steps (look for numbered items)
-        steps = []
+        # Split response into steps. Accept two header styles: plain
+        # numbered items ("2. ") and markdown bold headers ("**Step 2 —**"),
+        # since prompts cannot force one exact format on the LLM.
+        step_header = re.compile(
+            r"^(?:\d+\.\s|\*{0,2}\s*step\s*\d+\b[\s:.—-]*)",
+            re.IGNORECASE,
+        )
+        has_numbered_header = re.compile(r"^(?:\d+\.|\**\s*step\s*\d+\b)", re.IGNORECASE)
+
+        steps: list[dict] = []
         current_step = ""
         step_num = 0
 
         for line in response.split("\n"):
             stripped = line.strip()
-            # Detect numbered steps (1., 2., etc.)
-            if stripped and stripped[0].isdigit() and "." in stripped[:4]:
+            if stripped and has_numbered_header.match(stripped):
                 if current_step:
                     step_num += 1
                     steps.append({
@@ -289,7 +298,8 @@ handles branching, committing and pushing automatically after implementation.
                         "description": current_step.strip(),
                         "agent": "Code_Executor",
                     })
-                current_step = stripped.split(".", 1)[-1].strip()
+                current_step = step_header.sub("", stripped).strip()
+                current_step = current_step.removesuffix("**").strip()
             elif current_step:
                 current_step += " " + stripped
 

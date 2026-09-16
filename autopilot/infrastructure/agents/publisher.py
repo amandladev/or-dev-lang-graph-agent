@@ -105,23 +105,25 @@ class PublisherAgent:
         rules = self._load_rules()
 
         git_results = self._execute_git_workflow(ticket_id, ticket, rules, workspace, modified_files)
-
-        jira_result = self._update_jira(ticket_id, ticket, evidence, rules)
-
-        metrics = {
-            "published": all(op["success"] for op in git_results["operations"]),
-            "ticket_id": ticket_id,
-            "git": git_results,
-            "jira_update": jira_result,
-            "rules_applied": rules.get("source", "default"),
-        }
-
-        if not metrics["published"]:
+        published = all(op["success"] for op in git_results["operations"])
+        if not published:
             failed = [op for op in git_results["operations"] if not op["success"]]
             details = "; ".join(
                 f"{' '.join(op['command'])} -> {op['output'][:200]}" for op in failed
             )
             raise PublishError(f"Git workflow failed: {details}")
+
+        jira_result = self._update_jira(ticket_id, ticket, evidence, rules)
+        pr_result = self._create_pull_request(ticket_id, ticket, rules, workspace)
+
+        metrics = {
+            "published": True,
+            "ticket_id": ticket_id,
+            "git": git_results,
+            "jira_update": jira_result,
+            "pull_request": pr_result,
+            "rules_applied": rules.get("source", "default"),
+        }
 
         return {"metrics": metrics}
 
@@ -407,11 +409,116 @@ class PublisherAgent:
         if not transition:
             return {"skipped": True, "reason": "No jira_transition rule configured"}
 
-        # Full Jira update API not yet implemented — report as skipped so
-        # downstream metrics consumers don't mistake this for a real update.
+        transition_name = transition.rsplit("->", 1)[-1].strip()
+        if not transition_name:
+            return {
+                "skipped": False,
+                "success": False,
+                "ticket_id": ticket_id,
+                "transition_rule": transition,
+                "error": "jira_transition does not specify a target transition",
+            }
+
+        try:
+            jira = self._tool_registry.get("jira")
+        except KeyError as exc:
+            return {
+                "skipped": False,
+                "success": False,
+                "ticket_id": ticket_id,
+                "transition": transition_name,
+                "error": str(exc),
+            }
+
+        project = str(ticket.get("project", "")).strip()
+        instance = project or ticket_id.partition("-")[0].upper()
+        result = jira.execute(
+            action="apply_transition",
+            ticket_id=ticket_id,
+            transition_name=transition_name,
+            instance=instance,
+        )
+
+        if not result.success:
+            return {
+                "skipped": False,
+                "success": False,
+                "ticket_id": ticket_id,
+                "transition": transition_name,
+                "error": result.error or "Jira transition failed",
+            }
+
         return {
-            "skipped": True,
+            "skipped": False,
+            "success": True,
             "ticket_id": ticket_id,
-            "transition": transition,
-            "reason": "Jira update not yet implemented",
+            "transition": transition_name,
+            "result": result.data or {},
         }
+
+    def _create_pull_request(
+        self,
+        ticket_id: str,
+        ticket: dict,
+        rules: dict,
+        workspace: dict,
+    ) -> dict[str, Any]:
+        """Open a pull request after publishing, when rules request it.
+
+        Uses the GitHub tool, which builds the PR with the local gh CLI
+        authentication. Opened automatically only when the vault rules set
+        ``create_pr: true``; any PR failure is reported in metrics but does
+        not fail the publishing workflow (the branch is already pushed).
+
+        Args:
+            ticket_id: The ticket identifier.
+            ticket: Ticket data (title used for the PR title).
+            rules: Workflow rules including create_pr and pr_base.
+            workspace: Workspace info providing path and branch.
+
+        Returns:
+            Dict with PR result or skip information.
+        """
+        if not rules.get("create_pr"):
+            return {"skipped": True, "reason": "No create_pr rule configured"}
+
+        workspace_path = workspace.get("path", "") if isinstance(workspace, dict) else ""
+        workspace_branch = workspace.get("branch", "") if isinstance(workspace, dict) else ""
+        if not workspace_branch:
+            return {
+                "skipped": False,
+                "success": False,
+                "error": "No workspace branch available to open a PR from",
+            }
+
+        try:
+            github = self._tool_registry.get("github")
+        except KeyError as exc:
+            return {"skipped": True, "reason": "github tool not available", "reason_detail": str(exc)}
+
+        base = rules.get("pr_base") or rules.get("branch_from", "") or "develop"
+        raw_title = rules.get("commit_pattern", "feat({ticket_id}): {description}").format(
+            ticket_id=ticket_id,
+            description=ticket.get("title", "Implementation"),
+        )
+        title = self._sanitize_commit_message(raw_title)
+        body = (
+            f"Automated pull request for {ticket_id} opened by Autopilot.\n\n"
+            f"Ticket: {ticket.get('title', '')}"
+        )
+
+        result = github.execute(
+            action="create_pr",
+            cwd=workspace_path,
+            head=workspace_branch,
+            base=base,
+            title=title,
+            body=body,
+        )
+
+        if result.success:
+            data = result.data or {}
+            return {"skipped": False, "success": True, "pr_url": data.get("pr_url", "")}
+        if isinstance(result.data, dict) and result.data.get("skipped"):
+            return {"skipped": True, "reason": result.data.get("reason", "")}
+        return {"skipped": False, "success": False, "error": result.error or "PR creation failed"}
