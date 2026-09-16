@@ -17,7 +17,7 @@ Autopilot is **not** a code assistant. It is an orchestrator that coordinates ex
 - **Clean Architecture** — the domain has zero external dependencies; swapping Jira for another tracker, JSON persistence for SQLite, or OpenCode for another runner touches only the infrastructure layer.
 - **Local-first** — everything runs on your machine: no cloud infrastructure, no data leaves your environment.
 
-**Honest trade-offs.** The orchestrator is only as good as its agents: LLM calls dominate latency and results vary run to run. Some integrations are still stubs (git, github, playwright, Jira transitions) — the [Roadmap](#roadmap--whats-left-to-improve) reflects the gaps. The knowledge base starts as keyword-based JSON search — a deliberate first step before investing in a vector store.
+**Honest trade-offs.** The orchestrator is only as good as its agents: LLM calls dominate latency and results vary run to run. Some integrations are still stubs (git, github, playwright) — the [Roadmap](#roadmap--whats-left-to-improve) reflects the gaps. The knowledge base starts as keyword-based JSON search — a deliberate first step before investing in a vector store.
 
 ## Table of Contents
 
@@ -173,11 +173,11 @@ Create `.autopilot-rules.md` at the root of your Obsidian vault:
 
 If this file does not exist, default rules are used. It also looks for rules in loose notes as a fallback.
 
-**Note:** `jira_transition` is read and reflected in the run metrics (`metrics.jira_update`),
-but the Publisher **does not call the Jira API yet** to apply the transition or post
-comments — `_update_jira` explicitly reports `{"skipped": true}`. Use
-`autopilot ledger`/the run record to confirm the real state; do not assume the ticket
-changed status just because you configured the rule.
+After Git publishes successfully, Publisher applies `jira_transition` through the Jira API.
+For an arrow rule such as `In Progress -> Code Review`, the target transition is
+`Code Review`; a direct transition name is also accepted. The outcome is stored in
+`metrics.jira_update`. Jira failures do not undo an already-pushed Git commit and are
+reported there with `success: false` and an error message.
 
 ### Environment variable override
 
@@ -357,7 +357,7 @@ Common messages when running `autopilot work`/`resume`/`config`/`ledger` and how
 | `Vault directory not found: ...` | `vault_location` points to a folder that does not exist | Fix the path in `~/.autopilot.yaml` (it must be the root of your Obsidian vault). |
 | `Jira credentials incomplete for instance 'X'` (warning) | `JIRA_X_URL` / `JIRA_X_EMAIL` / `JIRA_X_TOKEN` are missing for the ticket prefix (e.g. `PROJ-123` → instance `PROJ`) | Export the three environment variables for that instance. Without them, Context_Builder simply skips the Jira fetch (it does not block the run). |
 | The command runs but never creates/pushes a branch | You are running `--dry-run`, or `.autopilot-rules.md` does not define valid rules | Remove `--dry-run` for a real run; check that `.autopilot-rules.md` exists at the vault root with the expected format (see [Workflow rules](#workflow-rules-vault)). |
-| The ticket status does not change in Jira even though I configured `jira_transition` | Publisher does not implement the real Jira API call for transitions yet | Expected behavior for now — see the note in [Workflow rules](#workflow-rules-vault) and the roadmap. Apply the transition manually in Jira. |
+| The ticket status does not change in Jira even though I configured `jira_transition` | The target transition is unavailable, credentials are missing, or the Jira request failed | Inspect `metrics.jira_update.error` in the run record and verify that the target name matches one of the ticket's available Jira transitions. |
 | `Not a git repository, skipping ledger commit` (log) | The `workspace_location` is not a git repo | Not a blocking error: the ledger is still saved in `ledger.json`, only the commit to `autopilot-results` is skipped. Initialize a git repo there if you want that versioned history. |
 | `autopilot resume` fails with `State file not found: ...` | There is no `.autopilot_state.json` in the workspace (no previous run persisted state) | Run `autopilot work TICKET_ID` first; `resume` only applies to workflows that failed or paused midway. |
 | I changed `~/.autopilot.yaml` but I don't see the effect | There is a `.autopilot.yaml` in the project directory (local override) that takes priority | Check `autopilot config` to see which file was actually loaded, or delete/adjust the local override. |
@@ -411,34 +411,20 @@ autopilot/
 
 ## Roadmap — What's left to improve
 
-### Already implemented (verified in code, not in the original roadmap)
-
-- [x] **OpenCode sessions**: `OpenCodeTool` uses `--continue` to keep context between steps (`opencode_tool.py`)
-- [x] **Real terminal logging**: `StructuredLogger` is connected to `OrchestrationEngine` (`log_agent_start`/`log_agent_completion`/`log_retry`)
-- [x] **More detailed workflow output**: `autopilot work` prints a report with modified files, tests, errors and evidence (`cli/commands.py`)
-- [x] **Workspace detection**: `workspace_location` is auto-detected from the CWD in `yaml_config_loader.py` (override via `AUTOPILOT_WORKSPACE_LOCATION`)
-- [x] **Pre-execution validation**: `validate_environment` checks opencode/git availability, vault and workspace paths, and Jira credentials; `config_sanity_validator` runs first in every command (`infrastructure/validators.py`)
-- [x] **Knowledge base (Memory/RAG MVP)**: each run is stored as an `Experience` via `ExperienceBuilder` + `JsonKnowledgeEngine`; the Planner queries similar past experiences and includes them in its planning prompt (`application/knowledge/`, `infrastructure/knowledge/`)
-
-### High priority
-
-- [ ] **Real Jira transition**: Publisher reads `jira_transition` but does not call the Jira API yet (`_update_jira` always reports `skipped`) — see the note in "Workflow rules"
-
 ### Medium priority
 
 - [ ] **Automatic PR**: Publisher creates a PR in GitHub/GitLab after the push
-- [ ] **Reviewer agent**: Pre-merge code analysis via OpenCode (agent and `review` command are connected stubs but not implemented; see `ReviewCommand`/`build_review_graph`)
+- [ ] **Reviewer agent**: Implement and connect the registered `ReviewerAgent`, `review` command, and review graph
 - [ ] **Playwright tests**: Integrate E2E tests for projects with frontend
 - [ ] **Multiple config merge**: Global config + per-project config (specific override)
-- [ ] **Failure diagnostics**: Use an LLM to generate failure diagnostics for operators
+- [ ] **Failure diagnostics**: Add LLM-generated operator diagnostics beyond the existing structured error reporting
 
 ### Low priority
 
-- [x] **Ticket isolation**: Run multiple tickets concurrently in independent Git worktrees
-- [ ] **Parallel execution**: Run independent plan steps in parallel
+- [ ] **Parallel plan execution**: Run independent plan steps concurrently within a ticket
 - [ ] **Web UI**: Dashboard to view the status of active workflows
 - [ ] **Plugin system**: Allow adding custom agents and tools without modifying the core
-- [ ] **Metrics and analytics**: Time per agent, success rate, tokens consumed
+- [ ] **Metrics and analytics**: Persist per-agent timing, aggregate results across runs, and collect token/cost data
 
 ## License
 

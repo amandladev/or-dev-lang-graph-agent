@@ -355,13 +355,15 @@ def test_execute_raises_publish_error_when_git_fails():
     state = {"ticket": ticket, "evidence": []}
 
     with patch.object(agent, "_load_rules", return_value=_default_workflow_rules()), \
-         patch.object(agent, "_update_jira", return_value={"skipped": True}), \
+            patch.object(agent, "_update_jira", return_value={"skipped": True}) as update_jira, \
          patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="boom")
 
         from autopilot.domain.value_objects.exceptions import PublishError
         with pytest.raises(PublishError):
             agent.execute(state)
+
+        update_jira.assert_not_called()
 
 
 def test_execute_metrics_published_true_when_all_git_ops_succeed():

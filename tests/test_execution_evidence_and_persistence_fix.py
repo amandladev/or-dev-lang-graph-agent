@@ -4,8 +4,7 @@ Covers:
 1. Code_Executor now returns its per-step execution log as evidence.
 2. OrchestrationEngine._serialize_state logs persistence failures instead
    of silently swallowing them.
-3. Publisher._update_jira accurately reports skipped=True for the
-   not-yet-implemented Jira transition path.
+3. Publisher._update_jira applies configured Jira transitions and reports failures.
 4. Publisher._load_rules no longer has the redundant (KeyError, Exception)
    except clause.
 """
@@ -18,6 +17,7 @@ from hypothesis import strategies as st
 
 from autopilot.application.orchestrator.engine import OrchestrationEngine
 from autopilot.application.orchestrator.retry_policy import RetryPolicy
+from autopilot.domain.interfaces.tool_interface import ToolResult
 from autopilot.infrastructure.agents.code_executor import CodeExecutorAgent
 from autopilot.infrastructure.agents.publisher import PublisherAgent
 from autopilot.infrastructure.agents.reviewer import ReviewerAgent
@@ -145,18 +145,57 @@ def test_serialize_state_does_not_crash_workflow_on_failure():
         )
 
 
-# Publisher: _update_jira accurately reports skipped status
-
-
-def test_update_jira_not_implemented_reports_skipped_true():
-    agent = PublisherAgent(tool_registry=MagicMock())
+def test_update_jira_applies_target_transition():
+    jira = MagicMock()
+    jira.execute.return_value = ToolResult(
+        success=True,
+        data={"applied": "Code Review", "id": "31"},
+    )
+    registry = MagicMock()
+    registry.get.return_value = jira
+    agent = PublisherAgent(tool_registry=registry)
     rules = {"jira_transition": "In Progress -> Code Review"}
 
-    result = agent._update_jira("TICKET-1", {}, [], rules)
+    result = agent._update_jira("TICKET-1", {"project": "TEST"}, [], rules)
 
-    assert result["skipped"] is True
-    assert result["reason"] == "Jira update not yet implemented"
-    assert result["transition"] == "In Progress -> Code Review"
+    jira.execute.assert_called_once_with(
+        action="apply_transition",
+        ticket_id="TICKET-1",
+        transition_name="Code Review",
+        instance="TEST",
+    )
+    assert result == {
+        "skipped": False,
+        "success": True,
+        "ticket_id": "TICKET-1",
+        "transition": "Code Review",
+        "result": {"applied": "Code Review", "id": "31"},
+    }
+
+
+def test_update_jira_reports_transition_failure():
+    jira = MagicMock()
+    jira.execute.return_value = ToolResult(success=False, error="Transition not available")
+    registry = MagicMock()
+    registry.get.return_value = jira
+    agent = PublisherAgent(tool_registry=registry)
+
+    result = agent._update_jira(
+        "TEST-1",
+        {},
+        [],
+        {"jira_transition": "Code Review"},
+    )
+
+    assert result["skipped"] is False
+    assert result["success"] is False
+    assert result["error"] == "Transition not available"
+    jira.execute.assert_called_once_with(
+        action="apply_transition",
+        ticket_id="TEST-1",
+        transition_name="Code Review",
+        instance="TEST",
+    )
 
 
 def test_update_jira_no_transition_configured_reports_skipped_true():

@@ -227,7 +227,7 @@ say "=== Running: autopilot work $TICKET_ID ==="
 
 say "=== Verification ==="
 
-RUN_RECORD=$(ls "$WS"/runs/*/run-record.json 2>/dev/null | head -1)
+RUN_RECORD=$(ls -dt "$WS"/runs/*/run-record.json 2>/dev/null | head -1)
 [ -n "$RUN_RECORD" ] || fail "run record not found under $WS/runs/"
 
 python3 - "$RUN_RECORD" <<'PY'

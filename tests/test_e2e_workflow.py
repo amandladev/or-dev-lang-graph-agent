@@ -331,8 +331,14 @@ def test_workflow_applies_vault_rules(e2e_app, e2e_sandbox):
     state = json.loads((worktree / ".autopilot_state.json").read_text(encoding="utf-8"))
     assert state["metrics"]["rules_applied"] == "vault"
     jira_update = state["metrics"]["jira_update"]
-    assert jira_update["skipped"] is True
-    assert jira_update["transition"] == "In Progress -> Code Review"
+    assert jira_update["skipped"] is False
+    assert jira_update["success"] is True
+    assert jira_update["transition"] == "Code Review"
+    assert any(
+        call.get("action") == "apply_transition"
+        and call.get("transition_name") == "Code Review"
+        for call in fakes["jira"].calls
+    )
 
 
 def test_multiple_tickets_run_in_separate_worktrees(e2e_app, e2e_sandbox):

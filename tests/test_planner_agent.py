@@ -259,3 +259,39 @@ def test_knowledge_engine_failure_never_blocks_plan_generation(error_message: st
 
     opencode.execute.assert_called_once()
     assert "plan" in output
+
+# Regression: raw_response from an E2E run used "**Step N — ...**" markdown
+# headers, which the parser accepted as one giant fallback step, silently
+# dropping the rest of the plan (tests, CLI, README were never implemented)
+# while the workflow still reported PASS.
+def test_parse_plan_accepts_markdown_step_headers():
+    agent = PlannerAgent(tool_registry=MagicMock())
+    response = (
+        "## Implementation Plan — T-1\n"
+        "\n"
+        "**Step 1 — Create `src/todo.py`**\n"
+        "- What: create the module\n"
+        "\n"
+        "**Step 2 — Create `tests/test_todo.py`**\n"
+        "- What: cover behaviors\n"
+    )
+    plan = agent._parse_plan(response, {"id": "T-1"})
+    assert [s["step"] for s in plan["steps"]] == [1, 2]
+    assert plan["steps"][0]["description"].startswith("Create `src/todo.py`")
+    assert "What: create the module" in plan["steps"][0]["description"]
+    assert "**" not in plan["steps"][0]["description"]
+
+
+def test_parse_plan_plain_numbered_items_still_work():
+    agent = PlannerAgent(tool_registry=MagicMock())
+    response = "1. Create src/main.py\nImpl details\n\n2. Add tests\ntest details\n"
+    plan = agent._parse_plan(response, {"id": "T-1"})
+    assert len(plan["steps"]) == 2
+    assert plan["steps"][1]["description"].startswith("Add tests")
+
+
+def test_parse_plan_mixed_styles_still_splits():
+    agent = PlannerAgent(tool_registry=MagicMock())
+    response = "1. First step\n\n**Step 2 — Second**\ndetail\n3. Third step\n"
+    plan = agent._parse_plan(response, {"id": "T-1"})
+    assert len(plan["steps"]) == 3
